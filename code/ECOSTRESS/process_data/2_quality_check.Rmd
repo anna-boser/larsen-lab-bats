@@ -1,0 +1,39 @@
+---
+title: "Check LST quality"
+author: "Anna Boser"
+date: '2022-05-03'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(raster)
+library(here)
+library(stringr)
+```
+
+## check the quality of the ECOSTRESS LST images
+```{r}
+files <- list.files(path = here("data", "ECOSTRESS", "int", "celcius"), full.names = TRUE)
+
+pal <- colorRampPalette(c("darkblue", "blue", "steelblue1", "white", "yellow", "orange", "red"))
+
+plot_with_name <- function(raster){
+  print(plot(raster, 
+             col = pal(50), 
+             main=names(raster), 
+             zlim=c(0, 60)))
+}
+
+plot_batch <- function(batch){
+  files <- files[(1:10+(batch*10))]
+  rasters <- lapply(files, raster)
+  print(lapply(rasters, plot_with_name))
+}
+```
+
+```{r}
+plot_batch(0)
+```
+
+
