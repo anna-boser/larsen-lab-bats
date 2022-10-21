@@ -1,0 +1,205 @@
+---
+title: "Land Cover Analysis for Bat Presence"
+author: "D. Nākoa Farrant"
+date: "2022-10-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(stars) # ʻstarsʻ requires 'sf' 0.9.8 was found, but >= 1.0.3
+#library(raster)
+library(sf)
+library(terra)
+library(exactextractr)
+```
+
+
+# Workflow
+1) Create an FVEG raster with a new column. The new column uses the values of WHR13NUM except where WHRNUM = 15 or  WHRNUM = 19 or  WHRNUM = 37 or  WHRNUM = 59 which are all reclassified to 200 (an arbitrary value used for riparian land cover types). Use the Lookup tool to export a raster of the new FVEG column (done in ArcMap)
+2) Read in Land IQ data, create a summer crop ID column that doesn't overlap with the ID values for FVEG. Rasterize the Land IQ crop data layer based on summer crop id (CROPTYP2)
+3) Create a combined land cover raster using a conditional that uses I15 crop data where possible and fills in the blanks with FVEG data
+4) Start bat analysis. More to do from here...
+
+# Read in FVEG data
+```{r}
+# fveg from CALFIRE FRAP
+# https://map.dfg.ca.gov/metadata/ds1327.html
+
+# read into arcmap and then exported as a tif because had trouble reading the geodatabase in R
+# create a new column that is equal to WHR13NAME except where WHRNUM has riparian values: 15 (Desert Riparian), 19, 37 (Montane Riparian), 56 (Valley Foothill Riparian)
+# Use the Lookup tool to export the new column as a raster and read that in here
+fveg <- rast("~/Documents/github/larsen-lab-bats/data/landcover_analysis/fveg/fveg_ReclassVegCode_NAD83.tif")
+```
+
+# Read in Land IQ crop data shapefile
+```{r}
+# Data IQ crop data from 2018 downloaded from https://data.cnra.ca.gov/dataset/statewide-crop-mapping
+landIQ <- st_read("~/Documents/github/larsen-lab-bats/data/landcover_analysis/landIQ_2018/i15_Crop_Mapping_2018.shp") %>% 
+  st_transform(st_crs(3310)) %>%  # project into NAD83 / California Albers projection
+  st_make_valid()
+```
+
+# Read in bat study site and occurrence data
+```{r}
+bat_study_area <- st_read("~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/bats_study_area/bats_study_area.shp") %>% 
+  st_transform(st_crs(3310)) %>% 
+  st_make_valid()
+
+bat_occ <- rast("~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/bats2017_NAD83.tif") # Converted to the NAD83 CRS (CRS: 3310) in ArcMap and exported for use here
+```
+
+```{r}
+# Crop to bat study area
+landIQ_clip2bats <- st_crop(landIQ, bat_study_area)
+```
+
+```{r}
+# Alternative code that does the same as the above chunk, just slightly slower and also adds a CropName column
+SummerCropID_crosswalk <- read_csv("~/Documents/github/larsen-lab-bats/data/landcover_analysis/CSV_files/SummerCropID.csv")
+landIQ_clip2bats_SummerCropID <- merge(landIQ_clip2bats, SummerCropID_crosswalk, by = "CROPTYP2")
+```
+
+```{r}
+landIQ_clip2bats_SummerCropID_vect <- vect(landIQ_clip2bats_SummerCropID)
+```
+
+
+```{r}
+landIQ_raster <- terra::rasterize(landIQ_clip2bats_SummerCropID_vect, fveg, field = "SummerCropID") 
+# what fun (function) should be used if any in fasterize?
+#https://rdrr.io/cran/fasterize/man/fasterize.html
+```
+
+# Reclassify the appropriate values of i15_raster to NA
+```{r}
+# specify SummerCropID values to reclassify to NA in reclassification matrix
+# These values are Urban (246), Not Cropped (248), and No subclass (249) 
+reclass_m = cbind(is = c(246, 248, 249), becomes = c(NA, NA, NA))
+
+# Create a reclassified raster with NA values added for classes we don't want
+landIQ_raster_reclass <- classify(landIQ_raster, reclass_m)
+```
+
+# Merge Land IQ data and fveg data
+```{r}
+lc_merge <- merge(x = landIQ_raster_reclass, y = fveg)
+```
+
+```{r}
+plot(lc_merge)
+```
+
+# Resample the land cover 
+
+```{r}
+lc_merge_resample <- terra::resample(lc_merge, bat_occ, "near")
+```
+
+# Vectorize raster layer
+```{r}
+# try a solution that requires sf, sp, raster, and stars packages
+lc_sf <- sf::as_Spatial(sf::st_as_sf(stars::st_as_stars(lc_merge_resample), as_points = FALSE, merge = T)) %>% 
+  st_as_sf()
+```
+
+```{r}
+# A dictionary that maps the values of the lc_cond_resample raster to labels
+LC_value_labels <- read_csv("~/Documents/github/larsen-lab-bats/data/landcover_analysis/CSV_files/SummerCropID_fvegidcombo.csv")
+```
+
+```{r}
+# join the polygon value IDs from the lc_cond_resample raster with the labels
+lc_label_sf <- merge(x = lc_sf, y = LC_value_labels, by.x = "values", by.y = "LC_ID")
+```
+
+```{r}
+lc_label_sf$area_m2 <- as.numeric(st_area(lc_label_sf)) # area in square meters 
+```
+
+# Identify where bat roosts are 
+```{r}
+bat_roosts2017 <- st_read("~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/ca_bat_roosts2017/ca_colonies.shp") %>% 
+  st_transform(st_crs(3310)) %>%  # project into NAD83 / California Albers projection
+  st_make_valid()
+```
+
+```{r}
+bat_roosts_points <- bat_roosts2017 %>% 
+  dplyr::select(xcoord, ycoord)
+
+bat_roosts_points_vect <- vect(bat_roosts_points)
+```
+
+```{r}
+# distance of bat grid cells to the different roosts 
+bat_roosts_distances <- distance(bat_occ, bat_roosts_points_vect) 
+```
+
+```{r}
+plot(bat_roosts_distances)
+```
+```{r} 
+bat_IDW_div1k <- bat_roosts_distances*bat_occ/1e3
+```
+
+
+```{r}
+# While it comes at the cost of adding another package (exactextractr), the exact_extract function is built to perform faster and to account for partial overlap of polygons with raster cells
+extract_bats_zonalstats <-  exact_extract(bat_IDW_div1k, lc_label_sf, fun = c('mean', 'stdev'))
+```
+
+
+```{r}
+extract_bats_zonalstats <- extract_bats_zonalstats %>%
+  tibble::rownames_to_column("ID")
+```
+
+```{r}
+lc_label_sf <- lc_label_sf %>% 
+  tibble::rownames_to_column("ID")
+```
+
+```{r}
+lc_label_zonalstats <- merge(lc_label_sf, extract_bats_zonalstats, by = "ID")
+```
+
+```{r}
+lc_area_summ <- lc_label_zonalstats %>% 
+  st_drop_geometry() %>% 
+  group_by(WHR10NAME) %>% 
+  summarise(area_ha = sum(area_m2/1e4, na.rm = T))
+```
+
+```{r}
+ggplot(data = lc_area_summ, aes(x = reorder(WHR10NAME, area_ha), y = area_ha)) +
+  geom_col() + 
+  coord_flip() +
+  labs(x = "Land Cover", y = "Area in the Study Region (ha)") +
+  theme_bw() +
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+```
+
+
+```{r}
+lc_bats_summ <- lc_label_zonalstats %>% 
+  st_drop_geometry() %>% 
+  group_by(WHR10NAME) %>% 
+  summarise(mean_LC = mean(mean, na.rm = T), stdev_LC = mean(stdev, na.rm = T))
+```
+
+
+```{r}
+# by far the most presence in connifer woodland
+ggplot(data = lc_bats_summ, aes(x = reorder(WHR10NAME, mean_LC), y = mean_LC)) + 
+  geom_point() +
+  geom_errorbar(aes(ymin=mean_LC-stdev_LC, ymax=mean_LC+stdev_LC)) +
+  coord_flip() + 
+  labs(x = "Land Cover", y = "Average Distance Weighted Bat Occurrence") +
+  theme_bw() +
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+```
