@@ -1,0 +1,250 @@
+---
+title: "Remove bat roost signal"
+author: "Anna Boser"
+date: "2022-10-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(stars) # ʻstarsʻ requires 'sf' 0.9.8 was found, but >= 1.0.3
+#library(raster)
+library(sf)
+library(terra)
+library(exactextractr)
+library(here)
+library(splines)
+library(ggplot2)
+```
+
+## Remove the signal from the bat roosts
+
+
+```{r}
+# bat occurance data
+bat_occ <- rast(here("data","aggregated_data", "2017_aggregate_2017.tif"))
+
+# roost location
+bat_roosts <- st_read(here("data", "ca_bat_roosts", "ca_colonies.shp")) %>% st_make_valid()
+```
+
+```{r}
+# turn bat occ data into a dataframe
+bat_occ_df <- as.data.frame(bat_occ, xy=TRUE)
+names(bat_occ_df) <- c("x", "y", "bats")
+
+# x locations of roosts
+x_roosts <- bat_roosts$xcoord
+
+# y locations of roosts
+y_roosts <- bat_roosts$ycoord
+```
+
+```{r}
+# plot out the raw bat data
+ggplot() + 
+  geom_raster(data = bat_occ_df, aes(x=x, y=y, fill=bats)) + 
+  geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord))
+```
+
+
+```{r}
+spline <- lm(formula = bats ~ bs(x, degree = 3, knots = x_roosts)*bs(y, degree = 3, knots = y_roosts) , data = bat_occ_df)
+bat_occ_df$spline <- spline$fitted.values
+```
+
+```{r}
+ggplot() + 
+  geom_raster(data = bat_occ_df, aes(x=x, y=y, fill=spline)) + 
+  geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord))
+```
+
+That did not work. Second trial: plot out the spatial decay for each of the 8 roosts
+
+```{r}
+# Make a function that only keeps points that are within r from a point
+
+spot_filter <- function(d, x_center, y_center, r){
+  # first do a rough approximation 
+  d <- filter(d, x > x_center-r, x < x_center+r, y > y_center-r, y < y_center+r)
+  # then go over and get rid of the corners
+  d$dist = sqrt((d$x - x_center)^2+(d$y - y_center)^2)
+  d <- d[d$dist<r,]
+  return(d)
+}
+
+d <- spot_filter(d=bat_occ_df, x_center=x_roosts[1], y_center=y_roosts[1], r=0.05)
+```
+
+```{r}
+ggplot(d) + 
+  geom_point(aes(x=dist, y=bats))
+```
+
+```{r}
+# fit some exponential
+fit <- lm(log(bats) ~ log(dist), data = d)
+ggplot(d) + 
+  geom_point(aes(x=dist, y=bats)) + 
+  geom_line(aes(x=dist, y=exp(fit$fitted.values)), color = "red")
+```
+
+```{r}
+# fit some exponential
+fit <- glm(bats/max(bats) ~ dist, family = "binomial", data = d)
+ggplot(d) + 
+  geom_point(aes(x=dist, y=bats)) + 
+  geom_line(aes(x=dist, y=fit$fitted.values*max(bats)), color = "red")
+```
+
+I thing the logistic regression wins. Neither is perfect though... maybe there's a better function out there. Now I need to code it up so that
+1: I can get the logistic regressions for all 8 roosts
+2: I can combine all of the regressions on the 3d plane
+
+To combine all of the regressions, I think that I'll 
+1: separately calculate the predictions over the entire study area for each regression
+2: add them together
+3: subtract the result from the observed bats
+
+Ok full step by step: 
+1: add a column for distance to each roost to bat_occ_df
+2: Fit a separate logistic regression for each roost based on the closest 0.05 degrees
+3: generate predictions for each roost regression
+4: add together the predictions for each roost regression
+5: subtract the total roost regression from the bats
+6: plot out the result
+
+```{r}
+# 1: add a column for distance to each roost to bat_occ_df
+add_dist_col <- function(d, roost_num){
+  x_center = bat_roosts$xcoord[roost_num]
+  y_center = bat_roosts$ycoord[roost_num]
+  d[paste0("dist", roost_num)] = sqrt((d$x - x_center)^2+(d$y - y_center)^2)
+  return(d)
+}
+
+for (i in 1:nrow(bat_roosts)){
+  bat_occ_df <- add_dist_col(bat_occ_df, i)
+}
+```
+
+```{r}
+# 2: Fit a separate logistic regression for each roost based on the closest 0.05 degrees
+# and
+# 3: generate predictions for each roost regression
+
+logistic_pred <- function(d, roost_num, r){
+  d['dist'] <- d[paste0("dist", roost_num)]
+  save <- d
+  d <- d[d['dist']<r,]
+  max_bats = max(d$bats)
+  fit <- glm(bats/max_bats ~ dist, family = "binomial", data = d)
+  
+  plot <- ggplot(d) + 
+    geom_point(aes(x=dist, y=bats)) + 
+    geom_line(aes(x=dist, y=fit$fitted.values*max_bats), color = "red") + 
+    ggtitle(paste("logistic", bat_roosts$xcoord[roost_num], bat_roosts$ycoord[roost_num]))
+  print(plot)
+  
+  save[paste0("logistic", roost_num)] <- predict(fit, save)*max_bats
+  return(save)
+}
+
+exponential_pred <- function(d, roost_num, r){
+  d['dist'] <- d[paste0("dist", roost_num)]
+  save <- d
+  d <- d[d['dist']<r,]
+  fit <- lm(log(bats) ~ log(dist), data = d)
+  
+  plot <- ggplot(d) + 
+    geom_point(aes(x=dist, y=bats)) + 
+    geom_line(aes(x=dist, y=exp(fit$fitted.values)), color = "red") + 
+    ggtitle(paste("exponential", bat_roosts$xcoord[roost_num], bat_roosts$ycoord[roost_num]))
+  print(plot)
+  
+  save[paste0("exponential", roost_num)] <- exp(predict(fit, save))
+  return(save)
+}
+```
+
+```{r}
+for (i in 1:nrow(bat_roosts)){
+  bat_occ_df <- logistic_pred(d=bat_occ_df, roost_num=i, r=0.05)
+}
+```
+
+```{r}
+for (i in 1:nrow(bat_roosts)){
+  bat_occ_df <- exponential_pred(d=bat_occ_df, roost_num=i, r=0.05)
+}
+```
+
+```{r}
+# 4: add together the predictions for each roost regression
+# and 
+# 5: subtract the total roost regression from the bats
+
+corrected_pred <- function(d, func="logistic"){
+  d[func] <- 0
+  for (i in 1:nrow(bat_roosts)){
+    d[func] <- d[func] + d[paste0(func, i)]
+  }
+  d[paste0(func, "_pred")] <- d["bats"] - d[func]
+  return(d)
+}
+
+bat_occ_df <- corrected_pred(bat_occ_df, func="logistic")
+bat_occ_df <- corrected_pred(bat_occ_df, func="exponential")
+```
+
+```{r}
+# 6: plot out the result
+ggplot() + 
+  geom_raster(data = bat_occ_df, aes(x=x, y=y, fill=bats)) + 
+  geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
+  ggtitle("original_bats")
+
+ggplot() + 
+  geom_raster(data = bat_occ_df, aes(x=x, y=y, fill=logistic)) + 
+  geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
+  ggtitle("logistic_predictions")
+
+ggplot() + 
+  geom_raster(data = bat_occ_df, aes(x=x, y=y, fill=logistic_pred)) + 
+  geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
+  ggtitle("logistic_corrected_bats")
+```
+
+```{r}
+ggplot() + 
+  geom_raster(data = bat_occ_df, aes(x=x, y=y, fill=bats)) + 
+  geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
+  ggtitle("original_bats")
+
+ggplot() + 
+  geom_raster(data = bat_occ_df, aes(x=x, y=y, fill=exponential)) + 
+  geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
+  ggtitle("exponential_predictions")
+
+ggplot() + 
+  geom_raster(data = bat_occ_df, aes(x=x, y=y, fill=exponential_pred)) + 
+  geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
+  ggtitle("exponential_corrected_bats")
+
+far_from_roosts <- filter(bat_occ_df, 
+                          dist1 > 0.01, 
+                          dist2 > 0.01, 
+                          dist3 > 0.01,
+                          dist4 > 0.01,
+                          dist5 > 0.01,
+                          dist6 > 0.01,
+                          dist7 > 0.01,
+                          dist8 > 0.01)
+ggplot() + 
+  geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=exponential_pred)) + 
+  geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
+  ggtitle("exponential_corrected_bats (0.01 degrees from roosts)")
+```
+
+
