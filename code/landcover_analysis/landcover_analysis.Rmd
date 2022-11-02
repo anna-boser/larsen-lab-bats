@@ -38,8 +38,8 @@ fveg <- rast("~/Documents/github/larsen-lab-bats/data/landcover_analysis/fveg/fv
 
 # Read in Land IQ crop data shapefile
 ```{r}
-# Data IQ crop data from 2018 downloaded from https://data.cnra.ca.gov/dataset/statewide-crop-mapping
-landIQ <- st_read("~/Documents/github/larsen-lab-bats/data/landcover_analysis/landIQ_2018/i15_Crop_Mapping_2018.shp") %>% 
+# Data IQ crop data from 2019 downloaded from https://data.cnra.ca.gov/dataset/statewide-crop-mapping
+landIQ <- st_read("~/Documents/github/larsen-lab-bats/data/landcover_analysis/i15_Crop_Mapping_2019/i15_Crop_Mapping_2019.shp") %>% 
   st_transform(st_crs(3310)) %>%  # project into NAD83 / California Albers projection
   st_make_valid()
 ```
@@ -171,12 +171,27 @@ lc_label_zonalstats <- merge(lc_label_sf, extract_bats_zonalstats, by = "ID")
 ```{r}
 lc_area_summ <- lc_label_zonalstats %>% 
   st_drop_geometry() %>% 
-  group_by(WHR10NAME) %>% 
+  group_by(Classification) %>% 
   summarise(area_ha = sum(area_m2/1e4, na.rm = T))
 ```
 
 ```{r}
-ggplot(data = lc_area_summ, aes(x = reorder(WHR10NAME, area_ha), y = area_ha)) +
+ggplot(data = lc_area_summ, aes(x = reorder(Classification, area_ha), y = area_ha)) +
+  geom_col() + 
+  coord_flip() +
+  labs(x = "Land Cover", y = "Area in the Study Region (ha)") +
+  theme_bw() +
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+```
+```{r}
+lc_area_summ2 <- lc_label_zonalstats %>% 
+  st_drop_geometry() %>% 
+  group_by(Classification2) %>% 
+  summarise(area_ha = sum(area_m2/1e4, na.rm = T))
+```
+
+```{r}
+ggplot(data = lc_area_summ2, aes(x = reorder(Classification2, area_ha), y = area_ha)) +
   geom_col() + 
   coord_flip() +
   labs(x = "Land Cover", y = "Area in the Study Region (ha)") +
@@ -184,18 +199,36 @@ ggplot(data = lc_area_summ, aes(x = reorder(WHR10NAME, area_ha), y = area_ha)) +
   theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
 ```
 
-
 ```{r}
 lc_bats_summ <- lc_label_zonalstats %>% 
   st_drop_geometry() %>% 
-  group_by(WHR10NAME) %>% 
+  group_by(Classification) %>% 
   summarise(mean_LC = mean(mean, na.rm = T), stdev_LC = mean(stdev, na.rm = T))
 ```
 
 
 ```{r}
 # by far the most presence in connifer woodland
-ggplot(data = lc_bats_summ, aes(x = reorder(WHR10NAME, mean_LC), y = mean_LC)) + 
+ggplot(data = lc_bats_summ, aes(x = reorder(Classification, mean_LC), y = mean_LC)) + 
+  geom_point() +
+  geom_errorbar(aes(ymin=mean_LC-stdev_LC, ymax=mean_LC+stdev_LC)) +
+  coord_flip() + 
+  labs(x = "Land Cover", y = "Average Distance Weighted Bat Occurrence") +
+  theme_bw() +
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+```
+
+```{r}
+lc_bats_summ2 <- lc_label_zonalstats %>% 
+  st_drop_geometry() %>% 
+  group_by(Classification2) %>% 
+  summarise(mean_LC = mean(mean, na.rm = T), stdev_LC = mean(stdev, na.rm = T))
+```
+
+
+```{r}
+# by far the most presence in connifer woodland
+ggplot(data = lc_bats_summ2, aes(x = reorder(Classification2, mean_LC), y = mean_LC)) + 
   geom_point() +
   geom_errorbar(aes(ymin=mean_LC-stdev_LC, ymax=mean_LC+stdev_LC)) +
   coord_flip() + 
