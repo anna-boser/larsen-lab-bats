@@ -109,7 +109,7 @@ lc_sf <- sf::as_Spatial(sf::st_as_sf(stars::st_as_stars(lc_merge_resample), as_p
 
 ```{r}
 # A dictionary that maps the values of the lc_cond_resample raster to labels
-LC_value_labels <- read_csv("~/Documents/github/larsen-lab-bats/data/landcover_analysis/CSV_files/SummerCropID_fvegidcombo.csv")
+LC_value_labels <- read_csv("~/Documents/github/larsen-lab-bats/data/landcover_analysis/CSV_files/SummerCropID_fvegid_combo.csv")
 ```
 
 ```{r}
@@ -149,13 +149,17 @@ bat_IDW_div1k <- bat_roosts_distances*bat_occ/1e3
 
 
 ```{r}
+#extract_bats_zonalstats <-  exact_extract(bat_IDW_div1k, lc_label_sf, fun = c('mean', 'stdev'))
+```
+
+```{r}
 # While it comes at the cost of adding another package (exactextractr), the exact_extract function is built to perform faster and to account for partial overlap of polygons with raster cells
-extract_bats_zonalstats <-  exact_extract(bat_IDW_div1k, lc_label_sf, fun = c('mean', 'stdev'))
+extract_rawbats_zonalstats <-  exact_extract(bat_occ, lc_label_sf, fun = c('mean', 'stdev'))
 ```
 
 
 ```{r}
-extract_bats_zonalstats <- extract_bats_zonalstats %>%
+extract_rawbats_zonalstats <- extract_rawbats_zonalstats %>%
   tibble::rownames_to_column("ID")
 ```
 
@@ -165,8 +169,13 @@ lc_label_sf <- lc_label_sf %>%
 ```
 
 ```{r}
-lc_label_zonalstats <- merge(lc_label_sf, extract_bats_zonalstats, by = "ID")
+lc_label_zonalstats <- merge(lc_label_sf, extract_rawbats_zonalstats, by = "ID")
 ```
+
+```{r}
+st_write(lc_label_zonalstats, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/lc_label_zonalstats.shp", append = F)
+```
+
 
 ```{r}
 lc_area_summ <- lc_label_zonalstats %>% 
@@ -184,14 +193,14 @@ ggplot(data = lc_area_summ, aes(x = reorder(Classification, area_ha), y = area_h
   theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
 ```
 ```{r}
-lc_area_summ2 <- lc_label_zonalstats %>% 
+lc_area_GenLC_summ <- lc_label_zonalstats %>% 
   st_drop_geometry() %>% 
-  group_by(Classification2) %>% 
+  group_by(Gen_Class) %>% 
   summarise(area_ha = sum(area_m2/1e4, na.rm = T))
 ```
 
 ```{r}
-ggplot(data = lc_area_summ2, aes(x = reorder(Classification2, area_ha), y = area_ha)) +
+ggplot(data = lc_area_GenLC_summ, aes(x = reorder(Gen_Class, area_ha), y = area_ha)) +
   geom_col() + 
   coord_flip() +
   labs(x = "Land Cover", y = "Area in the Study Region (ha)") +
@@ -200,7 +209,26 @@ ggplot(data = lc_area_summ2, aes(x = reorder(Classification2, area_ha), y = area
 ```
 
 ```{r}
-lc_bats_summ <- lc_label_zonalstats %>% 
+lc_rawbats_GenLCsumm <- lc_label_zonalstats %>% 
+  st_drop_geometry() %>% 
+  group_by(Gen_Class) %>% 
+  summarise(mean_LC = mean(mean, na.rm = T), stdev_LC = mean(stdev, na.rm = T))
+```
+
+
+```{r}
+# by far the most presence in connifer woodland
+ggplot(data = lc_rawbats_GenLCsumm, aes(x = reorder(Gen_Class, mean_LC), y = mean_LC)) + 
+  geom_point() +
+  geom_errorbar(aes(ymin=mean_LC-stdev_LC, ymax=mean_LC+stdev_LC)) +
+  coord_flip() + 
+  labs(x = "Land Cover", y = "Average Raw Bats Over Land Cover Type") +
+  theme_bw() +
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+```
+
+```{r}
+lc_rawbats_summ <- lc_label_zonalstats %>% 
   st_drop_geometry() %>% 
   group_by(Classification) %>% 
   summarise(mean_LC = mean(mean, na.rm = T), stdev_LC = mean(stdev, na.rm = T))
@@ -208,31 +236,11 @@ lc_bats_summ <- lc_label_zonalstats %>%
 
 
 ```{r}
-# by far the most presence in connifer woodland
-ggplot(data = lc_bats_summ, aes(x = reorder(Classification, mean_LC), y = mean_LC)) + 
+ggplot(data = lc_rawbats_summ, aes(x = reorder(Classification, mean_LC), y = mean_LC)) + 
   geom_point() +
   geom_errorbar(aes(ymin=mean_LC-stdev_LC, ymax=mean_LC+stdev_LC)) +
   coord_flip() + 
-  labs(x = "Land Cover", y = "Average Distance Weighted Bat Occurrence") +
-  theme_bw() +
-  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
-```
-
-```{r}
-lc_bats_summ2 <- lc_label_zonalstats %>% 
-  st_drop_geometry() %>% 
-  group_by(Classification2) %>% 
-  summarise(mean_LC = mean(mean, na.rm = T), stdev_LC = mean(stdev, na.rm = T))
-```
-
-
-```{r}
-# by far the most presence in connifer woodland
-ggplot(data = lc_bats_summ2, aes(x = reorder(Classification2, mean_LC), y = mean_LC)) + 
-  geom_point() +
-  geom_errorbar(aes(ymin=mean_LC-stdev_LC, ymax=mean_LC+stdev_LC)) +
-  coord_flip() + 
-  labs(x = "Land Cover", y = "Average Distance Weighted Bat Occurrence") +
+  labs(x = "Land Cover", y = "Average Raw Bats Over Land Cover Type") +
   theme_bw() +
   theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
 ```
