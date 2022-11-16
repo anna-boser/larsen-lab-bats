@@ -185,6 +185,19 @@ for (i in 1:nrow(bat_roosts)){
 ```
 
 ```{r}
+far_from_roosts <- filter(bat_occ_df, 
+                          dist1 > 0.01, 
+                          dist2 > 0.01, 
+                          dist3 > 0.01,
+                          dist4 > 0.01,
+                          dist5 > 0.01,
+                          dist6 > 0.01,
+                          dist7 > 0.01,
+                          dist8 > 0.01)
+```
+
+
+```{r}
 # 4: add together the predictions for each roost regression
 # and 
 # 5: subtract the total roost regression from the bats
@@ -194,13 +207,13 @@ corrected_pred <- function(d, func="logistic"){
   for (i in 1:nrow(bat_roosts)){
     d[func] <- d[func] + d[paste(func, i, sep = "_")]
   }
-  d[func] = d[func] - mean(d[func]) # remove baseline bat presence from the model
+  d[func] = d[,func] - mean(d[,func]) # remove baseline bat presence from the model. 
   d[paste0(func, "_pred")] <- d["bats"] - d[func]
   return(d)
 }
 
 # bat_occ_df <- corrected_pred(bat_occ_df, func="logistic")
-bat_occ_df <- corrected_pred(bat_occ_df, func="exponential_r0.05")
+far_from_roosts <- corrected_pred(far_from_roosts, func="exponential_r0.05")
 ```
 
 ```{r}
@@ -225,16 +238,6 @@ bat_occ_df <- corrected_pred(bat_occ_df, func="exponential_r0.05")
 ```{r}
 # plot out results for exponential
 
-far_from_roosts <- filter(bat_occ_df, 
-                          dist1 > 0.01, 
-                          dist2 > 0.01, 
-                          dist3 > 0.01,
-                          dist4 > 0.01,
-                          dist5 > 0.01,
-                          dist6 > 0.01,
-                          dist7 > 0.01,
-                          dist8 > 0.01)
-
 ggplot() + 
   geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=bats)) + 
   geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
@@ -254,39 +257,12 @@ ggplot() +
   scale_fill_distiller(palette="Spectral", direction = 1)
 
 ```
-```{r}
-far_from_roosts$exponential_r0.05_pred_noneg <- ifelse(far_from_roosts$exponential_r0.05_pred>0, far_from_roosts$exponential_r0.05_pred, 0)
-ggplot() + 
-  geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=exponential_r0.05_pred_noneg)) + 
-  geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
-  ggtitle("exponential_corrected_bats (0.01 degrees from roosts)") + 
-  scale_fill_distiller(palette="Spectral", direction = 1)
-```
 
+There are two problems with the above plots. 
+1) the exponential predictions are negative on the edges, so we need to bump those up to zero
+2) there are some negative bat predictions near the roots, so we need to bump those up to zero
 
 ```{r}
-# ok what happens if you train it on a much larger area
-for (i in 1:nrow(bat_roosts)){
-  bat_occ_df <- exponential_pred(d=bat_occ_df, roost_num=i, r=.5)
-}
-```
-
-
-```{r}
-bat_occ_df <- corrected_pred(bat_occ_df, func="exponential_r0.5")
-fwrite(bat_occ_df, here("data", "bats_roost_adjusted", "bat_occ_df.csv"))
-```
-
-```{r}
-far_from_roosts <- filter(bat_occ_df, 
-                          dist1 > 0.025, 
-                          dist2 > 0.025, 
-                          dist3 > 0.025,
-                          dist4 > 0.025,
-                          dist5 > 0.025,
-                          dist6 > 0.025,
-                          dist7 > 0.025,
-                          dist8 > 0.025)
 
 ggplot() + 
   geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=bats)) + 
@@ -294,34 +270,45 @@ ggplot() +
   ggtitle("original_bats") + 
   scale_fill_distiller(palette="Spectral", direction = 1)
 
+# first bump negative exponential predictions up to zero
+far_from_roosts$noneg <- ifelse(far_from_roosts$exponential_r0.05<0, 0, far_from_roosts$exponential_r0.05)
+
 ggplot() + 
-  geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=exponential_r0.5)) + 
+  geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=noneg)) + 
   geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
   ggtitle("exponential_corrected_bats (0.01 degrees from roosts)") + 
   scale_fill_distiller(palette="Spectral", direction = 1)
 
+# get new bat predictions
+far_from_roosts$noneg_pred <- far_from_roosts$bats - far_from_roosts$noneg
+
 ggplot() + 
-  geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=exponential_r0.5_pred)) + 
+  geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=noneg_pred)) + 
   geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
   ggtitle("exponential_corrected_bats (0.01 degrees from roosts)") + 
   scale_fill_distiller(palette="Spectral", direction = 1)
 
+# then bump negative bat predictions up to zero
+far_from_roosts$noneg_pred_noneg <- ifelse(far_from_roosts$noneg_pred<0, 0, far_from_roosts$noneg_pred)
+
+ggplot() + 
+  geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=noneg_pred_noneg)) + 
+  geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
+  ggtitle("exponential_corrected_bats (0.01 degrees from roosts)") + 
+  scale_fill_distiller(palette="Spectral", direction = 1)
 ```
-```{r}
-far_from_roosts$exponential_r0.5_pred_noneg <- ifelse(far_from_roosts$exponential_r0.5_pred>0, far_from_roosts$exponential_r0.5_pred, 0)
-ggplot() + 
-  geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=exponential_r0.5_pred_noneg)) + 
-  geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
-  ggtitle("exponential_corrected_bats (0.01 degrees from roosts)") + 
-  scale_fill_distiller(palette="Spectral", direction = 1)
-```
 
 
 ```{r}
+library(raster)
 # turn the corrected stuff back into a raster
-r <- rasterFromXYZ(far_from_roosts[, c('x', 'y', 'exponential_pred')], crs = crs(bat_occ))
+r <- rasterFromXYZ(far_from_roosts[, c('x', 'y', 'noneg_pred_noneg')], crs = crs(bat_occ))
 
 # save
-writeRaster(r, here("data","aggregated_data", "bats_exponential_corrected_2017.tif"))
+writeRaster(r, here("data","bats_roost_adjusted", "bats_exponential_corrected_2017.tif"), overwrite = TRUE)
+```
+
+```{r}
+# plot(rast(here("data","bats_roost_adjusted", "bats_exponential_corrected_2017.tif")))
 ```
 
