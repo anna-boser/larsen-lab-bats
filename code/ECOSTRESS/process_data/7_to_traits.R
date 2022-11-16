@@ -56,7 +56,7 @@ mdr <- function(T){
 } 
 
 # this is for Cx. Pipiens since tarsalis is not available
-fecundity(T) <- function(T){
+fecundity <- function(T){
   fecundity <- -(5.98*10^-1) * T * (T - 5.3) * (T - 38.9)
   fecundity <- ifelse(fecundity<0, 0, fecundity)
   return(fecundity)
@@ -83,3 +83,4 @@ adult <- function(T){
 to_trait(air_temp, "air_temp")
 to_trait(transmit, "transmission")
 to_trait(bite, "biting_rate")
+to_trait(adult, "adult_abundance")
