@@ -12,18 +12,35 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 library(stars) # ʻstarsʻ requires 'sf' 0.9.8 was found, but >= 1.0.3
-#library(raster)
 library(sf)
+library(raster) # used to resample FVEG raster with "ngb" method
 library(terra)
-library(exactextractr)
+library(nngeo) # to remove holes from polygons
+library(exactextractr) # extract bat occurrence in the land cover polygons
 ```
 
+# Read in bat study site and bat occurrence data
+```{r}
+# polygon with the extent of the study region
+bat_study_area <- st_read("~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/bats_study_area/bats_study_area.shp") %>% 
+  st_transform(st_crs(3310)) %>% 
+  st_make_valid()
 
-# Workflow
-1) Create an FVEG raster with a new column. The new column uses the values of WHR13NUM except where WHRNUM = 15 or  WHRNUM = 19 or  WHRNUM = 37 or  WHRNUM = 59 which are all reclassified to 200 (an arbitrary value used for riparian land cover types). Use the Lookup tool to export a raster of the new FVEG column (done in ArcMap)
-2) Read in Land IQ data, create a summer crop ID column that doesn't overlap with the ID values for FVEG. Rasterize the Land IQ crop data layer based on summer crop id (CROPTYP2)
-3) Create a combined land cover raster using a conditional that uses I15 crop data where possible and fills in the blanks with FVEG data
-4) Start bat analysis. More to do from here...
+# WGS84 projection of the raw bats
+bat_raw <- rast("~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/2017_aggregate_2017.tif") 
+# WGS84 projection of the exponentially corrected bat layer
+bat_exp <- rast("~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/bats_exponential_corrected_2017.tif") 
+```
+
+```{r}
+bat_raw_NAD83 <- project(bat_raw, "epsg:3310")
+bat_exp_NAD83 <- project(bat_exp, "epsg:3310")
+```
+
+```{r}
+writeRaster(bat_raw_NAD83, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/bats_aggregate_2017_NAD83.tif", overwrite = T)
+writeRaster(bat_exp_NAD83, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/bats_exponential_corrected_2017_NAD83.tif", overwrite = T)
+```
 
 # Read in FVEG data
 ```{r}
@@ -33,7 +50,29 @@ library(exactextractr)
 # read into arcmap and then exported as a tif because had trouble reading the geodatabase in R
 # create a new column that is equal to WHR13NAME except where WHRNUM has riparian values: 15 (Desert Riparian), 19, 37 (Montane Riparian), 56 (Valley Foothill Riparian)
 # Use the Lookup tool to export the new column as a raster and read that in here
-fveg <- rast("~/Documents/github/larsen-lab-bats/data/landcover_analysis/fveg/fveg_ReclassVegCode_NAD83.tif")
+# start using the raster package instead of terra so you can resample with nearest neighbor method
+fveg_raster <- raster("~/Documents/github/larsen-lab-bats/data/landcover_analysis/fveg/fveg_ReclassVegCode_NAD83.tif")
+```
+
+
+```{r}
+# resample fveg raster (30m) to the resolution of the bat data (70m) using the nearest neighbor method
+# the nearest neighbor method treats the class code numbers in the FVEG raster as categorical variables
+fveg_resample_ngb <- raster::resample(fveg_raster, bat_exp_NAD83_raster, method = "ngb")
+
+# convert the resampled raster to polygons in an SF object
+fveg_resample_ngb_sf <- sf::as_Spatial(sf::st_as_sf(stars::st_as_stars(fveg_resample_ngb), as_points = FALSE, merge = T)) %>% 
+  st_as_sf() %>% 
+  st_make_valid()
+
+st_write(fveg_resample_ngb_sf, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/fveg/fveg_resample_ngb_sf.gpkg", append = F)
+```
+
+```{r}
+# This code allows you to read in the resampled FVEG polygons if you want to skp to this step
+fveg_resample_ngb_sf <- st_read("~/Documents/github/larsen-lab-bats/data/landcover_analysis/fveg/fveg_resample_ngb_sf.gpkg") %>% 
+  st_transform(st_crs(3310)) %>%  # project into NAD83 / California Albers projection
+  st_make_valid()
 ```
 
 # Read in Land IQ crop data shapefile
@@ -44,203 +83,184 @@ landIQ <- st_read("~/Documents/github/larsen-lab-bats/data/landcover_analysis/i1
   st_make_valid()
 ```
 
-# Read in bat study site and occurrence data
 ```{r}
-bat_study_area <- st_read("~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/bats_study_area/bats_study_area.shp") %>% 
-  st_transform(st_crs(3310)) %>% 
-  st_make_valid()
-
-bat_occ <- rast("~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/bats2017_NAD83.tif") # Converted to the NAD83 CRS (CRS: 3310) in ArcMap and exported for use here
-```
-
-```{r}
-# Crop to bat study area
+# Crop the extent of land IQ agricultural data to bat study area
 landIQ_clip2bats <- st_crop(landIQ, bat_study_area)
-```
 
-```{r}
-# Alternative code that does the same as the above chunk, just slightly slower and also adds a CropName column
+# Read in a CSV dictionary to add SummerCropID and CropName associated with the CROPTYP2 column in the original landIQ dataset
+# SummerCropID was a code that was assigned to each CROPTYP2 arbitrarily in alphabetical order. The CropName is derived from the metadata associated with each CROPTYP2 abbreviation  
 SummerCropID_crosswalk <- read_csv("~/Documents/github/larsen-lab-bats/data/landcover_analysis/CSV_files/SummerCropID.csv")
 landIQ_clip2bats_SummerCropID <- merge(landIQ_clip2bats, SummerCropID_crosswalk, by = "CROPTYP2")
 ```
 
 ```{r}
-landIQ_clip2bats_SummerCropID_vect <- vect(landIQ_clip2bats_SummerCropID)
+# buffer the crop fields to fill in the gaps between fields
+landIQ_clip2bats_SummerCropID_buff80 <- st_buffer(landIQ_clip2bats_SummerCropID, 80)
+
+# summarise all of the buffered polygons into one feature occupying all of the area covered by Land IQ fields
+landIQ_buff80_summ <- landIQ_clip2bats_SummerCropID_buff80 %>% 
+  summarise()
+
+# remove the holes in the extent of the Land IQ fields
+landIQ_buff80_summ_rmvHoles <- st_remove_holes(landIQ_buff80_summ, max_area = 0)
+
+# export this data layer as a geopackage
+#st_write(landIQ_buff80_summ_rmvHoles , "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/landIQ_buff80_summ_rmvHoles.gpkg")
+```
+
+```{r}
+# read in the data layer if you want to skip some of the above steps
+#landIQ_buff80_summ_rmvHoles <- st_read("~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/landIQ_buff80_summ_rmvHoles.gpkg")
 ```
 
 
 ```{r}
-landIQ_raster <- terra::rasterize(landIQ_clip2bats_SummerCropID_vect, fveg, field = "SummerCropID") 
-# what fun (function) should be used if any in fasterize?
-#https://rdrr.io/cran/fasterize/man/fasterize.html
-```
-
-# Reclassify the appropriate values of i15_raster to NA
-```{r}
-# specify SummerCropID values to reclassify to NA in reclassification matrix
-# These values are Urban (246), Not Cropped (248), and No subclass (249) 
-reclass_m = cbind(is = c(246, 248, 249), becomes = c(NA, NA, NA))
-
-# Create a reclassified raster with NA values added for classes we don't want
-landIQ_raster_reclass <- classify(landIQ_raster, reclass_m)
-```
-
-# Merge Land IQ data and fveg data
-```{r}
-lc_merge <- merge(x = landIQ_raster_reclass, y = fveg)
+# map the existing FVEG land cover classes to a set of NewCode values to be associated with a future land cover class grouping
+library(plyr)
+fveg_resample_ngb_sf$NewCode <- fveg_resample_ngb_sf$fveg_ReclassVegCode_NAD83
+fveg_resample_ngb_sf$NewCode <- mapvalues(fveg_resample_ngb_sf$NewCode, from = c("10", "20", "31", "32", "41", "51", "52", "60", "70", "80", "90", "100", "200"), to = c("10", "20", "30", "30", "40", "50", "50", "60", "70", "80", "101", "101", "101"))
+detach(package:plyr)
 ```
 
 ```{r}
-plot(lc_merge)
-```
-
-# Resample the land cover 
-
-```{r}
-lc_merge_resample <- terra::resample(lc_merge, bat_occ, "near")
-```
-
-# Vectorize raster layer
-```{r}
-# try a solution that requires sf, sp, raster, and stars packages
-lc_sf <- sf::as_Spatial(sf::st_as_sf(stars::st_as_stars(lc_merge_resample), as_points = FALSE, merge = T)) %>% 
-  st_as_sf()
+# Create a helper function to erase polygons (y) from another set of polygons (x)
+st_erase <- function(x, y) st_difference(x, st_union(st_combine(y)))
 ```
 
 ```{r}
-# A dictionary that maps the values of the lc_cond_resample raster to labels
-LC_value_labels <- read_csv("~/Documents/github/larsen-lab-bats/data/landcover_analysis/CSV_files/SummerCropID_fvegid_combo.csv")
+# Identify which parts of the FVEG layer have no Land IQ polygons on it
+# takes 4 hours to run
+fveg_erase_landIQ <- st_erase(st_make_valid(fveg_resample_ngb_sf), st_make_valid(landIQ_clip2bats_SummerCropID))
+st_write(fveg_erase_landIQ, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/fveg_erase_landIQ.gpkg")
+
+# Create a "clean" set of polygons of FVEG that doesnʻt include any FVEG polygons that occupy the spaces between land IQ fields
+# takes 1.75 hours to run
+fveg_clean_allpolys <- st_erase(st_make_valid(fveg_erase_landIQ), st_make_valid(landIQ_buff80_summ_rmvHoles))
+st_write(fveg_clean_allpolys, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/fveg_clean_allpolys.gpkg")
+
+# Create a set of polygons that consists of just the areas between Land IQ fields with FVEG land cover classes
+# takes 8.5 hours to run
+space_between_fields_allpolys <- st_erase(st_make_valid(fveg_erase_landIQ), st_make_valid(fveg_clean_allpolys))
+st_write(space_between_fields_allpolys, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/space_between_fields_allpolys.gpkg")
 ```
 
 ```{r}
-# join the polygon value IDs from the lc_cond_resample raster with the labels
-lc_label_sf <- merge(x = lc_sf, y = LC_value_labels, by.x = "values", by.y = "LC_ID")
-```
+# The space_between_fields_allpolys features have codes that align with the NewCode column in FVEG
+# but we want to differentiate the FVEG classes between fields from the larger clusters of FVEG 'natural lands' because the FVEG between land IQ fields might not be that 'natural'
+# Thus we add create a map a new set of values for the FVEG codes between fields and rename that column to be NewCode to make it easier to rbind the three sets of polygons (land IQ, fveg, space between fields) in a future step
+library(plyr)
+space_between_fields_allpolys$fveg_btwnfields <- space_between_fields_allpolys$NewCode
+space_between_fields_allpolys$fveg_btwnfields <- mapvalues(space_between_fields_allpolys$fveg_btwnfields, from = c("10", "20", "30", "40", "50", "60", "70", "80", "101"), to = c("210", "220", "230", "240", "250", "260", "270", "280", "290"))
 
-```{r}
-lc_label_sf$area_m2 <- as.numeric(st_area(lc_label_sf)) # area in square meters 
-```
+space_between_fields_allpolys <- space_between_fields_allpolys %>% 
+  dplyr::select(-NewCode) %>% 
+  mutate(NewCode = fveg_btwnfields) %>% 
+  dplyr::select(NewCode, geom)
 
-# Identify where bat roosts are 
-```{r}
-bat_roosts2017 <- st_read("~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/ca_bat_roosts2017/ca_colonies.shp") %>% 
-  st_transform(st_crs(3310)) %>%  # project into NAD83 / California Albers projection
-  st_make_valid()
-```
-
-```{r}
-bat_roosts_points <- bat_roosts2017 %>% 
-  dplyr::select(xcoord, ycoord)
-
-bat_roosts_points_vect <- vect(bat_roosts_points)
-```
-
-```{r}
-# distance of bat grid cells to the different roosts 
-bat_roosts_distances <- distance(bat_occ, bat_roosts_points_vect) 
-```
-
-```{r}
-plot(bat_roosts_distances)
-```
-```{r} 
-bat_IDW_div1k <- bat_roosts_distances*bat_occ/1e3
+detach(package:plyr)
 ```
 
 
 ```{r}
-#extract_bats_zonalstats <-  exact_extract(bat_IDW_div1k, lc_label_sf, fun = c('mean', 'stdev'))
-```
+# Read in a CSV dictionary of labels and codes for different land cover types
+LC_newcode_labels <- read_csv("~/Documents/github/larsen-lab-bats/data/landcover_analysis/CSV_files/newcode_labels.csv")
 
-```{r}
-# While it comes at the cost of adding another package (exactextractr), the exact_extract function is built to perform faster and to account for partial overlap of polygons with raster cells
-extract_rawbats_zonalstats <-  exact_extract(bat_occ, lc_label_sf, fun = c('mean', 'stdev'))
-```
-
-
-```{r}
-extract_rawbats_zonalstats <- extract_rawbats_zonalstats %>%
-  tibble::rownames_to_column("ID")
-```
-
-```{r}
-lc_label_sf <- lc_label_sf %>% 
-  tibble::rownames_to_column("ID")
-```
-
-```{r}
-lc_label_zonalstats <- merge(lc_label_sf, extract_rawbats_zonalstats, by = "ID")
-```
-
-```{r}
-st_write(lc_label_zonalstats, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/lc_label_zonalstats.shp", append = F)
+# Use the dictionary to map the SummerCropID to a set of NewCode values
+landIQ_allpoly_relabel <- merge(landIQ_clip2bats_SummerCropID, LC_newcode_labels, by.x = "SummerCropID", by.y = "LC_ID")
 ```
 
 
 ```{r}
-lc_area_summ <- lc_label_zonalstats %>% 
-  st_drop_geometry() %>% 
-  group_by(Classification) %>% 
-  summarise(area_ha = sum(area_m2/1e4, na.rm = T))
+# prep a version of fveg features that only includes a NewCode column
+fveg_clean_allpolys_NewCode <- fveg_clean_allpolys %>% 
+  dplyr::select(NewCode, geom)
+
+# prep a version of Land IQ features that only includes a NewCode column
+landIQ_allpoly_relabel_NewCode <- landIQ_allpoly_relabel %>% 
+  dplyr::rename(geom = geometry) %>% 
+  dplyr::select(NewCode, geom)
+
+# merge 'clean' FVEG, land IQ field polygons, and the space between field polygons into one sf layer with distinct NewCode values for each land cover type
+merged_allpolys_lc_r <- do.call("rbind", list(fveg_clean_allpolys_NewCode, landIQ_allpoly_relabel_NewCode, space_between_fields_allpolys))
+
+# Merge in additional metadata from the above CSV including NewClass names based on the NewCode values
+merged_allpolys_lc_r <- merge(merged_allpolys_lc_r, LC_newcode_labels, by = "NewCode")
 ```
 
 ```{r}
-ggplot(data = lc_area_summ, aes(x = reorder(Classification, area_ha), y = area_ha)) +
+# combine the bat SpatRast layers
+bat_stack <- c(bat_raw_NAD83, bat_exp_NAD83)
+
+# extract the bat information
+merged_allpolys_lc_r <- cbind(merged_allpolys_lc_r, exact_extract(bat_stack, merged_allpolys_lc_r, fun = c('mean', 'stdev')))
+
+# calculate the area (hectares) of each polygon
+merged_allpolys_lc_r$area_ha <- as.numeric(st_area(merged_allpolys_lc_r))/(1e4)
+
+# export the resulting sf object with extracted bat and area attributes
+st_write(merged_allpolys_lc_r, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/merged_allpolys_lc_r.gpkg")
+```
+
+```{r}
+# read in this sf object if you want to skip all of the previous steps
+merged_allpolys_lc_r <- st_read("~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/merged_allpolys_lc_r.gpkg")
+```
+
+```{r}
+# drop the geometry of the sf object to make it a df for faster manipulation
+merged_allpolys_lc_r_df <- merged_allpolys_lc_r %>% 
+  st_drop_geometry()
+
+# calculate the total area (ha) in each of the land cover types
+merged_allpolys_lc_r_area_summ <- merged_allpolys_lc_r_df %>% 
+  group_by(NewClass) %>% 
+  summarise(class_area_ha = sum(area_ha, na.rm = T))
+```
+
+```{r}
+# plot the total area for each of the land cover classes
+merged_all_polys_lc_r_area <- ggplot(data = merged_allpolys_lc_r_area_summ, aes(x = reorder(NewClass, class_area_ha), y = class_area_ha)) +
   geom_col() + 
   coord_flip() +
   labs(x = "Land Cover", y = "Area in the Study Region (ha)") +
   theme_bw() +
   theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
-```
-```{r}
-lc_area_GenLC_summ <- lc_label_zonalstats %>% 
-  st_drop_geometry() %>% 
-  group_by(Gen_Class) %>% 
-  summarise(area_ha = sum(area_m2/1e4, na.rm = T))
-```
 
-```{r}
-ggplot(data = lc_area_GenLC_summ, aes(x = reorder(Gen_Class, area_ha), y = area_ha)) +
-  geom_col() + 
-  coord_flip() +
-  labs(x = "Land Cover", y = "Area in the Study Region (ha)") +
-  theme_bw() +
-  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
-```
-
-```{r}
-lc_rawbats_GenLCsumm <- lc_label_zonalstats %>% 
-  st_drop_geometry() %>% 
-  group_by(Gen_Class) %>% 
-  summarise(mean_LC = mean(mean, na.rm = T), stdev_LC = mean(stdev, na.rm = T))
+merged_lc_r_area
 ```
 
 
 ```{r}
-# by far the most presence in connifer woodland
-ggplot(data = lc_rawbats_GenLCsumm, aes(x = reorder(Gen_Class, mean_LC), y = mean_LC)) + 
+# calculate the average raw and exponential bats over each land cover class as well as a 95% confidence interval
+allpolys_r_rawbats_summ <- merged_allpolys_lc_r_df %>% 
+  dplyr::select(NewClass, mean.2017_aggregate_2017) %>% 
+  group_by(NewClass) %>% 
+  summarise(mean_LC = mean(mean.2017_aggregate_2017, na.rm = T), sd_LC = sd(mean.2017_aggregate_2017, na.rm = T), obs_count = length(NewClass), se_LC = sd_LC/sqrt(obs_count), LC_95perc = 1.96*se_LC)
+
+allpolys_r_expbats_summ <- merged_allpolys_lc_r_df %>% 
+  dplyr::select(NewClass, mean.bats_exponential_corrected_2017) %>% 
+  group_by(NewClass) %>% 
+  summarise(mean_LC = mean(mean.bats_exponential_corrected_2017, na.rm = T), sd_LC = sd(mean.bats_exponential_corrected_2017, na.rm = T), obs_count = length(NewClass), se_LC = sd_LC/sqrt(obs_count), LC_95perc = 1.96*se_LC)
+```
+
+```{r}
+# plot the average and 95% confidence interval of raw and exponentially corrected bats over each land cover type
+allpolys_lc_rawbats_mean <- ggplot(data = allpolys_r_rawbats_summ, aes(x = reorder(NewClass, mean_LC), y = mean_LC)) + 
   geom_point() +
-  geom_errorbar(aes(ymin=mean_LC-stdev_LC, ymax=mean_LC+stdev_LC)) +
+  geom_errorbar(aes(ymin=mean_LC-LC_95perc, ymax=mean_LC+LC_95perc)) +
   coord_flip() + 
-  labs(x = "Land Cover", y = "Average Raw Bats Over Land Cover Type") +
+  labs(x = "Land Cover", y = "Average Raw Bats Over Land Cover Type (R all polygons)") +
   theme_bw() +
   theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
-```
 
-```{r}
-lc_rawbats_summ <- lc_label_zonalstats %>% 
-  st_drop_geometry() %>% 
-  group_by(Classification) %>% 
-  summarise(mean_LC = mean(mean, na.rm = T), stdev_LC = mean(stdev, na.rm = T))
-```
-
-
-```{r}
-ggplot(data = lc_rawbats_summ, aes(x = reorder(Classification, mean_LC), y = mean_LC)) + 
+allpolys_lc_expbats_mean <- ggplot(data = allpolys_r_expbats_summ, aes(x = reorder(NewClass, mean_LC), y = mean_LC)) + 
   geom_point() +
-  geom_errorbar(aes(ymin=mean_LC-stdev_LC, ymax=mean_LC+stdev_LC)) +
+  geom_errorbar(aes(ymin=mean_LC-LC_95perc, ymax=mean_LC+LC_95perc)) +
   coord_flip() + 
-  labs(x = "Land Cover", y = "Average Raw Bats Over Land Cover Type") +
+  labs(x = "Land Cover", y = "Average Exponentially Corrected Bats Over Land Cover Type (R all polygons)") +
   theme_bw() +
   theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+allpolys_lc_rawbats_mean
+allpolys_lc_expbats_mean
 ```
