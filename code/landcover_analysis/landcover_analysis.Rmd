@@ -51,14 +51,21 @@ writeRaster(bat_exp_NAD83, "~/Documents/github/larsen-lab-bats/data/landcover_an
 # create a new column that is equal to WHR13NAME except where WHRNUM has riparian values: 15 (Desert Riparian), 19, 37 (Montane Riparian), 56 (Valley Foothill Riparian)
 # Use the Lookup tool to export the new column as a raster and read that in here
 # start using the raster package instead of terra so you can resample with nearest neighbor method
-fveg_raster <- raster("~/Documents/github/larsen-lab-bats/data/landcover_analysis/fveg/fveg_ReclassVegCode_NAD83.tif")
+fveg_raster <- rast("~/Documents/github/larsen-lab-bats/data/landcover_analysis/fveg/fveg_ReclassVegCode_NAD83.tif")
+```
+
+
+```{r}
+m1 <- cbind(c(10, 20, 31, 32, 41, 42, 51, 52, 60, 70, 80, 90, 100, 200), c(10, 20, 30, 30, 40, 40, 50, 50, 60, 70, 80, 101, 101, 101)) 
+
+fveg_raster_reclass <- classify(fveg_raster, m1)
 ```
 
 
 ```{r}
 # resample fveg raster (30m) to the resolution of the bat data (70m) using the nearest neighbor method
 # the nearest neighbor method treats the class code numbers in the FVEG raster as categorical variables
-fveg_resample_ngb <- raster::resample(fveg_raster, bat_exp_NAD83_raster, method = "ngb")
+fveg_resample_ngb <- terra::resample(fveg_raster_reclass, bat_exp_NAD83, method = "near")
 
 # convert the resampled raster to polygons in an SF object
 fveg_resample_ngb_sf <- sf::as_Spatial(sf::st_as_sf(stars::st_as_stars(fveg_resample_ngb), as_points = FALSE, merge = T)) %>% 
@@ -113,15 +120,6 @@ landIQ_buff80_summ_rmvHoles <- st_remove_holes(landIQ_buff80_summ, max_area = 0)
 #landIQ_buff80_summ_rmvHoles <- st_read("~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/landIQ_buff80_summ_rmvHoles.gpkg")
 ```
 
-
-```{r}
-# map the existing FVEG land cover classes to a set of NewCode values to be associated with a future land cover class grouping
-library(plyr)
-fveg_resample_ngb_sf$NewCode <- fveg_resample_ngb_sf$fveg_ReclassVegCode_NAD83
-fveg_resample_ngb_sf$NewCode <- mapvalues(fveg_resample_ngb_sf$NewCode, from = c("10", "20", "31", "32", "41", "51", "52", "60", "70", "80", "90", "100", "200"), to = c("10", "20", "30", "30", "40", "50", "50", "60", "70", "80", "101", "101", "101"))
-detach(package:plyr)
-```
-
 ```{r}
 # Create a helper function to erase polygons (y) from another set of polygons (x)
 st_erase <- function(x, y) st_difference(x, st_union(st_combine(y)))
@@ -131,30 +129,33 @@ st_erase <- function(x, y) st_difference(x, st_union(st_combine(y)))
 # Identify which parts of the FVEG layer have no Land IQ polygons on it
 # takes 4 hours to run
 fveg_erase_landIQ <- st_erase(st_make_valid(fveg_resample_ngb_sf), st_make_valid(landIQ_clip2bats_SummerCropID))
-st_write(fveg_erase_landIQ, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/fveg_erase_landIQ.gpkg")
+st_write(fveg_erase_landIQ, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/fveg_erase_landIQ.gpkg", append = F)
 
 # Create a "clean" set of polygons of FVEG that doesnʻt include any FVEG polygons that occupy the spaces between land IQ fields
 # takes 1.75 hours to run
 fveg_clean_allpolys <- st_erase(st_make_valid(fveg_erase_landIQ), st_make_valid(landIQ_buff80_summ_rmvHoles))
-st_write(fveg_clean_allpolys, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/fveg_clean_allpolys.gpkg")
+st_write(fveg_clean_allpolys, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/fveg_clean_allpolys.gpkg", append = F)
 
 # Create a set of polygons that consists of just the areas between Land IQ fields with FVEG land cover classes
 # takes 8.5 hours to run
 space_between_fields_allpolys <- st_erase(st_make_valid(fveg_erase_landIQ), st_make_valid(fveg_clean_allpolys))
-st_write(space_between_fields_allpolys, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/space_between_fields_allpolys.gpkg")
+st_write(space_between_fields_allpolys, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/space_between_fields_allpolys.gpkg", append = F)
 ```
+
+```{r}
+space_between_fields_allpolys <- st_read("~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/space_between_fields_allpolys.gpkg")
+```
+
 
 ```{r}
 # The space_between_fields_allpolys features have codes that align with the NewCode column in FVEG
 # but we want to differentiate the FVEG classes between fields from the larger clusters of FVEG 'natural lands' because the FVEG between land IQ fields might not be that 'natural'
 # Thus we add create a map a new set of values for the FVEG codes between fields and rename that column to be NewCode to make it easier to rbind the three sets of polygons (land IQ, fveg, space between fields) in a future step
 library(plyr)
-space_between_fields_allpolys$fveg_btwnfields <- space_between_fields_allpolys$NewCode
-space_between_fields_allpolys$fveg_btwnfields <- mapvalues(space_between_fields_allpolys$fveg_btwnfields, from = c("10", "20", "30", "40", "50", "60", "70", "80", "101"), to = c("210", "220", "230", "240", "250", "260", "270", "280", "290"))
+space_between_fields_allpolys$NewCode <- mapvalues(space_between_fields_allpolys$values, from = c("10", "20", "30", "40", "50", "60", "70", "80", "101"), to = c("210", "220", "230", "240", "250", "260", "270", "280", "290"))
 
-space_between_fields_allpolys <- space_between_fields_allpolys %>% 
-  dplyr::select(-NewCode) %>% 
-  mutate(NewCode = fveg_btwnfields) %>% 
+space_between_fields_allpolys_NewCode <- space_between_fields_allpolys %>% 
+  #dplyr::rename(geom = geometry) %>% # if you read in the "space_between_fields_allpolys.gpkg" end result, the name of the 'geometry' column will already be abbreviated as 'geom'. Otherwise you may need to rename the column to match the 'geom' column in the other FVEG and landIQ datasets you'll merge later
   dplyr::select(NewCode, geom)
 
 detach(package:plyr)
@@ -173,15 +174,17 @@ landIQ_allpoly_relabel <- merge(landIQ_clip2bats_SummerCropID, LC_newcode_labels
 ```{r}
 # prep a version of fveg features that only includes a NewCode column
 fveg_clean_allpolys_NewCode <- fveg_clean_allpolys %>% 
+  mutate(NewCode = values) %>% 
+  dplyr::rename(geom = geometry) %>%  #if you read in the "space_between_fields_allpolys.gpkg" end result, the name of the 'geometry' column will already be abbreviated as 'geom'. Otherwise you may need to rename the column to match the 'geom' column in the other FVEG and landIQ datasets you'll merge later
   dplyr::select(NewCode, geom)
 
 # prep a version of Land IQ features that only includes a NewCode column
 landIQ_allpoly_relabel_NewCode <- landIQ_allpoly_relabel %>% 
-  dplyr::rename(geom = geometry) %>% 
+  dplyr::rename(geom = geometry) %>% # if you read in the "space_between_fields_allpolys.gpkg" end result, the name of the 'geometry' column will already be abbreviated as 'geom'. Otherwise you may need to rename the column to match the 'geom' column in the other FVEG and landIQ datasets you'll merge later
   dplyr::select(NewCode, geom)
 
 # merge 'clean' FVEG, land IQ field polygons, and the space between field polygons into one sf layer with distinct NewCode values for each land cover type
-merged_allpolys_lc_r <- do.call("rbind", list(fveg_clean_allpolys_NewCode, landIQ_allpoly_relabel_NewCode, space_between_fields_allpolys))
+merged_allpolys_lc_r <- do.call("rbind", list(fveg_clean_allpolys_NewCode, landIQ_allpoly_relabel_NewCode, space_between_fields_allpolys_NewCode))
 
 # Merge in additional metadata from the above CSV including NewClass names based on the NewCode values
 merged_allpolys_lc_r <- merge(merged_allpolys_lc_r, LC_newcode_labels, by = "NewCode")
@@ -198,7 +201,7 @@ merged_allpolys_lc_r <- cbind(merged_allpolys_lc_r, exact_extract(bat_stack, mer
 merged_allpolys_lc_r$area_ha <- as.numeric(st_area(merged_allpolys_lc_r))/(1e4)
 
 # export the resulting sf object with extracted bat and area attributes
-st_write(merged_allpolys_lc_r, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/merged_allpolys_lc_r.gpkg")
+st_write(merged_allpolys_lc_r, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/merged_allpolys_lc_r.gpkg", append = F)
 ```
 
 ```{r}
