@@ -17,6 +17,7 @@ brick <- brick(here::here("data",
 to_trait <- function(trait_function, traitname){
   # apply trait function
   brick <- trait_function(brick)
+  print("done brick")
   # save brick
   writeRaster(brick, 
               here::here(new_path, 
@@ -25,6 +26,7 @@ to_trait <- function(trait_function, traitname){
               overwrite = TRUE)
   # save the mean
   mean <- mean(brick)
+  print("done mean")
   writeRaster(mean, 
               here::here(new_path, 
                          paste0(traitname, ".tif")),
@@ -45,13 +47,13 @@ transmit <- function(T){
 
 bite <- function(T){
   bite <- (1.67*10^-4) * T * (T- 2.3) * (32.0 - T)^(1/2)
-  bite <- ifelse(is.nan(bite), 0, bite)
+  bite[is.na(bite[])] <- 0
   return(bite)
 }
 
 mdr <- function(T){
   mdr <- (4.12*10^-5) * T * (T - 4.3) * (39.9 - T)^(1/2)
-  mdr <- ifelse(is.nan(mdr), 0, mdr)
+  mdr[is.na(mdr[])] <- 0
   return(mdr)
 } 
 
@@ -80,7 +82,7 @@ adult <- function(T){
 }
 
 # apply trait functions
-to_trait(air_temp, "air_temp")
-to_trait(transmit, "transmission")
+# to_trait(air_temp, "air_temp")
+# to_trait(transmit, "transmission")
 to_trait(bite, "biting_rate")
-to_trait(adult, "adult_abundance")
+# to_trait(adult, "adult_abundance")
