@@ -17,19 +17,20 @@ library(raster) # used to resample FVEG raster with "ngb" method
 library(terra)
 library(nngeo) # to remove holes from polygons
 library(exactextractr) # extract bat occurrence in the land cover polygons
+library(here)
 ```
 
 # Read in bat study site and bat occurrence data
 ```{r}
 # polygon with the extent of the study region
-bat_study_area <- st_read("~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/bats_study_area/bats_study_area.shp") %>% 
+bat_study_area <- st_read(here("data/landcover_analysis/bats/bats_study_area/bats_study_area.shp")) %>% 
   st_transform(st_crs(3310)) %>% 
   st_make_valid()
 
 # WGS84 projection of the raw bats
 #bat_raw <- rast("~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/2017_aggregate_2017.tif") 
 # WGS84 projection of the exponentially corrected bat layer
-bat_exp <- rast("~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/bats_exponential_corrected_2017.tif") 
+bat_exp <- rast(here("data/landcover_analysis/bats/bats_exponential_corrected_2017.tif")) 
 
 #bat_raw_NAD83 <- project(bat_raw, "epsg:3310")
 bat_exp_NAD83 <- project(bat_exp, "epsg:3310")
@@ -45,7 +46,7 @@ bat_exp_NAD83 <- project(bat_exp, "epsg:3310")
 # create a new column that is equal to WHR13NAME except where WHRNUM has riparian values: 15 (Desert Riparian), 19, 37 (Montane Riparian), 56 (Valley Foothill Riparian)
 # Use the Lookup tool to export the new column as a raster and read that in here
 # start using the raster package instead of terra so you can resample with nearest neighbor method
-fveg_raster <- rast("~/Documents/github/larsen-lab-bats/data/landcover_analysis/fveg/fveg_whr10num_ClipBats.tif")
+fveg_raster <- rast(here("data/landcover_analysis/fveg/fveg_whr10num_ClipBats.tif"))
 ```
 
 ```{r}
@@ -58,13 +59,13 @@ fveg_resample_ngb_sf <- sf::as_Spatial(sf::st_as_sf(stars::st_as_stars(fveg_resa
   st_as_sf() %>% 
   st_make_valid()
 
-st_write(fveg_resample_ngb_sf, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/fveg/fveg_resample_ngb_sf.gpkg", append = F)
+st_write(fveg_resample_ngb_sf, here("data/landcover_analysis/fveg/fveg_resample_ngb_sf.gpkg"), append = F)
 ```
 
 # Read in Land IQ crop data shapefile
 ```{r}
 # Data IQ crop data from 2019 downloaded from https://data.cnra.ca.gov/dataset/statewide-crop-mapping
-landIQ <- st_read("~/Documents/github/larsen-lab-bats/data/landcover_analysis/i15_Crop_Mapping_2019/i15_Crop_Mapping_2019.shp") %>% 
+landIQ <- st_read(here("data/landcover_analysis/i15_Crop_Mapping_2019/i15_Crop_Mapping_2019.shp")) %>% 
   st_transform(st_crs(3310)) %>%  # project into NAD83 / California Albers projection
   st_make_valid()
 
@@ -73,7 +74,7 @@ landIQ_clip2bats <- st_crop(landIQ, bat_study_area)
 
 # Read in a CSV dictionary to add SummerCropID and CropName associated with the CROPTYP2 column in the original landIQ dataset
 # SummerCropID was a code that was assigned to each CROPTYP2 arbitrarily in alphabetical order. The CropName is derived from the metadata associated with each CROPTYP2 abbreviation  
-SummerCropID_crosswalk <- read_csv("~/Documents/github/larsen-lab-bats/data/landcover_analysis/CSV_files/SummerCropID.csv")
+SummerCropID_crosswalk <- read_csv(here("data/landcover_analysis/CSV_files/SummerCropID.csv"))
 landIQ_clip2bats_SummerCropID <- merge(landIQ_clip2bats, SummerCropID_crosswalk, by = "CROPTYP2")
 
 # isolate a subset of columns of interest from the LandIQ data layer
@@ -90,7 +91,7 @@ st_erase <- function(x, y) st_difference(x, st_union(st_combine(y)))
 # took 4-5 hours to run using Apple M1 Pro chip, 16 GB, MacBook Pro 2021
 fveg_WHR10_erase_landIQ <- st_erase(st_make_valid(fveg_resample_ngb_sf), st_make_valid(landIQ_clip2bats_SummerCropID_sub))
 
-st_write(fveg_WHR10_erase_landIQ, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/fveg_WHR10_erase_landIQ.gpkg", append = F)
+st_write(fveg_WHR10_erase_landIQ, here("data/landcover_analysis/output_layers/fveg_WHR10_erase_landIQ.gpkg"), append = F)
 ```
 
 ```{r}
@@ -103,12 +104,16 @@ landIQ_LCID <- landIQ_clip2bats_SummerCropID_sub %>%
 
 fveg_landIQ_bind <- rbind(fveg_WHR10_erase_landIQ, landIQ_LCID)
 
-st_write(fveg_landIQ_bind, "~/Documents/github/larsen-lab-bats/data/landcover_analysis/output_layers/fveg_landIQ_bind.gpkg")
+st_write(fveg_landIQ_bind, here("data/landcover_analysis/output_layers/fveg_landIQ_bind.gpkg"))
+```
+
+```{r}
+fveg_landIQ_bind <- st_read(here("data/landcover_analysis/output_layers/fveg_landIQ_bind.gpkg"))
 ```
 
 ```{r}
 # Read in a CSV dictionary of labels and codes for different land cover types
-LC_newcode_labels <- read_csv("~/Documents/github/larsen-lab-bats/data/landcover_analysis/CSV_files/newcode_labels.csv")
+LC_newcode_labels <- read_csv(here("data/landcover_analysis/CSV_files/newcode_labels.csv"))
 
 fveg_landIQ_labeled <- merge(fveg_landIQ_bind, LC_newcode_labels, by = "LC_ID")
 
@@ -133,9 +138,14 @@ extract_expBats_terra_NewCode_f_df <- data.frame(extract_expBats_terra_NewCode_f
 ```
 
 ```{r}
+st_write(fveg_landIQ_labeled, here("data/landcover_analysis/output_layers/combined_lc_labeled.shp"))
+```
+
+
+```{r}
 NewCode_map <- data.frame(
   NewCode = c(10, 20, 30, 40, 50, 60, 70, 80, 101, 110, 120, 130, 140),
-  NewClass = c("Agriculture", "Barren_Other", "Conifer", "Desert", "Hardwood", "Herbaceous", "Shrub", "Urban", "Water_Wetland", "Fruits_Nuts_Vineyards", "Row_Field", "Grassland", "Rice")
+  NewClass = c("Other_Agriculture", "Barren_Other", "Conifer", "Desert", "Hardwood", "Herbaceous", "Shrub", "Urban", "Water_Wetland", "Fruits_Nuts_Vineyards", "Row_Field", "Grassland", "Rice")
 )
 
 extract_expBats_simple <- extract_expBats_terra_NewCode_f_df %>% 
@@ -151,9 +161,7 @@ fveg_landIQ_labeled_ObsCount_df <- fveg_landIQ_labeled %>%
   st_drop_geometry() %>% 
   group_by(NewCode) %>% 
   summarise(obs_count = n())
-```
 
-```{r}
 extract_merge_obs <- merge(extract_merge, fveg_landIQ_labeled_ObsCount_df, by = "NewCode")
 
 # calculate the Standard Error and 95% confidence interval
@@ -162,26 +170,59 @@ extract_merge_obs <- extract_merge_obs %>%
 ```
 
 ```{r}
+# calculate the average bat prescence across land cover types to be added as a reference line on the figure
+extract_merge_obs_mean <- mean(extract_merge_obs$Mean, na.rm = T) %>% round(1)
+# median value is very similar to the mean
+#extract_merge_obs_median <- median(extract_merge_obs$Mean, na.rm = T) %>% round(1)
+```
+
+
+```{r}
+group_colomap <- data.frame(
+  NewCode = c(10, 20, 30, 40, 50, 60, 70, 80, 101, 110, 120, 130, 140),
+  Group = c("Agriculture", "Urban/Other", "Natural", "Natural", "Natural", "Natural", "Natural", "Urban/Other", "Water", "Agriculture", "Agriculture", "Agriculture", "Agriculture")
+)
+
+cols <- c("Agriculture" = "#efb672", "Natural" = "#49be75", "Urban/Other" = "#bc5090", "Water" = "#003f5c")
+
+extract_merge_obs_mergecolor <- merge(extract_merge_obs, group_colomap, by = "NewCode")
+```
+
+```{r}
+# plot the average and the standard error
+allpolys_lc_expbats_mean <- ggplot(data = extract_merge_obs_mergecolor, aes(x = reorder(NewClass, Mean), y = Mean, color = Group)) + 
+  geom_point() +
+  geom_errorbar(aes(ymin=Mean-LC_95perc, ymax=Mean+LC_95perc, color = Group)) +
+  geom_hline(yintercept = extract_merge_obs_mean, color = "grey40", linetype = "dashed") + 
+  labs(x = "Land Cover", y = "Bat Presence") +
+  scale_color_manual(values = cols) +
+  coord_flip() + 
+  theme_bw() +
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1), text = element_text(size=18),
+        legend.title = element_blank(),
+    legend.position = c(0.8, 0.2),
+           legend.key.size = unit(1, "lines"),
+    legend.spacing.y = unit(0, "pt"),
+    legend.background = element_blank(),
+    #legend.position="bottom",
+    #legend.justification = "right",
+    legend.box.background = element_rect(size=0.5, linetype="solid", 
+                                  colour ="black"))
+
+allpolys_lc_expbats_mean
+```
+
+# Supplementary figures
+```{r}
 fveg_landIQ_labeled_area <- fveg_landIQ_labeled
 fveg_landIQ_labeled_area$area_m2 <- st_area(fveg_landIQ_labeled_area) %>% as.numeric()
+fveg_landIQ_labeled_area <- fveg_landIQ_labeled_area %>%  mutate(area_ha = area_m2/1e4)
 
 fveg_landIQ_labeled_area_df <- fveg_landIQ_labeled_area %>% 
   st_drop_geometry() %>% 
-  mutate(area_ha = area_m2/1e4) %>% 
-  group_by(NewCode) %>% 
-  summarise(ClassAreaHa = sum(area_ha, na.rm = T), SD_AreaHa = sd(area_ha, na.rm = T))
-```
-
-```{r}
-fveg_landIQ_labeled_area_df <- fveg_landIQ_labeled_area %>% 
-  st_drop_geometry() %>% 
-  mutate(area_ha = area_m2/1e4) %>% 
   group_by(NewCode) %>% 
   summarise(MeanClassAreaHa = mean(area_ha, na.rm = T), ClassAreaHa = sum(area_ha, na.rm = T), SD_AreaHa = sd(area_ha, na.rm = T))
-```
 
-
-```{r}
 area_merge <- merge(fveg_landIQ_labeled_area_df, NewCode_map, by = "NewCode")
 
 area_merge_obs <- merge(area_merge, fveg_landIQ_labeled_ObsCount_df, by = "NewCode")
@@ -191,47 +232,155 @@ area_merge_obs <- area_merge_obs %>%
   mutate(SE = SD_AreaHa/sqrt(obs_count), LC_95perc = 1.96*SE)
 ```
 
+```{r}
+area_merge_obs_mergecolor <- merge(area_merge_obs, group_colomap, by = "NewCode")
+```
+
 
 ```{r}
 # plot the total area for each of the land cover classes
-total_area_merge_obs_p <- ggplot(data = area_merge_obs, aes(x = reorder(NewClass, ClassAreaHa), y = ClassAreaHa)) +
+total_area_merge_obs_p <- ggplot(data = area_merge_obs_mergecolor, aes(x = reorder(NewClass, ClassAreaHa), y = ClassAreaHa, fill = Group)) +
   geom_col() + 
   coord_flip() +
   labs(x = "Land Cover", y = "Total Area of Land Cover Classes (ha)") +
+  scale_fill_manual(values = cols) +
   theme_bw() +
-  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+  theme(
+        panel.border = element_rect(colour = "black", fill=NA, size=1), text = element_text(size=18),
+        legend.title = element_blank(),
+    legend.position = c(0.8, 0.2),
+           legend.key.size = unit(1, "lines"),
+    legend.spacing.y = unit(0, "pt"),
+    legend.background = element_blank(),
+    #legend.position="bottom",
+    #legend.justification = "right",
+    legend.box.background = element_rect(size=0.5, linetype="solid", 
+                                  colour ="black"))
 
 total_area_merge_obs_p
 
-mean_area_merge_obs_p <- ggplot(data = area_merge_obs, aes(x = reorder(NewClass, MeanClassAreaHa), y = MeanClassAreaHa)) +
+mean_area_merge_obs_p <- ggplot(data = area_merge_obs_mergecolor, aes(x = reorder(NewClass, MeanClassAreaHa), y = MeanClassAreaHa, color = Group)) +
   geom_point() + 
-  geom_errorbar(aes(ymin=MeanClassAreaHa-LC_95perc, ymax=MeanClassAreaHa+LC_95perc)) +
+  geom_errorbar(aes(ymin=MeanClassAreaHa-LC_95perc, ymax=MeanClassAreaHa+LC_95perc, color = Group)) +
   coord_flip() +
-  labs(x = "Land Cover", y = "Average Area of Land Cover Class Parcels (ha)") +
+  labs(x = "Land Cover", y = "Area of Land Cover Parcels (ha)") +
+  scale_color_manual(values = cols) +
   theme_bw() +
-  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1), text = element_text(size=18),
+        legend.title = element_blank(),
+    legend.position = c(0.8, 0.2),
+           legend.key.size = unit(1, "lines"),
+    legend.spacing.y = unit(0, "pt"),
+    legend.background = element_blank(),
+    #legend.position="bottom",
+    #legend.justification = "right",
+    legend.box.background = element_rect(size=0.5, linetype="solid", 
+                                  colour ="black"))
 
 mean_area_merge_obs_p
 
-parcel_count_merge_obs_p <- ggplot(data = area_merge_obs, aes(x = reorder(NewClass, obs_count), y = obs_count)) +
+parcel_count_merge_obs_p <- ggplot(data = area_merge_obs_mergecolor, aes(x = reorder(NewClass, obs_count), y = obs_count, color = Group)) +
   geom_point() + 
   coord_flip() +
-  labs(x = "Land Cover", y = "Number of Parcels in Land Cover Class ()") +
+  labs(x = "Land Cover", y = "Number of Parcels in Land Cover Class") +
+  scale_color_manual(values = cols) +
   theme_bw() +
-  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1), text = element_text(size=18),
+        legend.title = element_blank(),
+    legend.position = c(0.8, 0.2),
+           legend.key.size = unit(1, "lines"),
+    legend.spacing.y = unit(0, "pt"),
+    legend.background = element_blank(),
+    #legend.position="bottom",
+    #legend.justification = "right",
+    legend.box.background = element_rect(size=0.5, linetype="solid", 
+                                  colour ="black"))
 
 parcel_count_merge_obs_p
 ```
 
 ```{r}
-# plot the average and the standard error
-allpolys_lc_expbats_mean <- ggplot(data = extract_merge_obs, aes(x = reorder(NewClass, Mean), y = Mean)) + 
-  geom_point() +
-  geom_errorbar(aes(ymin=Mean-LC_95perc, ymax=Mean+LC_95perc)) +
-  coord_flip() + 
-  labs(x = "Land Cover", y = "Average Bat Presence") +
-  theme_bw() +
-  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+fveg_landIQ_labeled_vect <- vect(fveg_landIQ_labeled)
 
-allpolys_lc_expbats_mean
+# function specifying what data to extract from the bats raster
+f <- function(x, na.rm = T) {
+       c(mean=mean(x, na.rm = na.rm),
+        sd=sd(x, na.rm = na.rm)
+    )
+}
+
+# extract the average and SD of exponentially corrected bat presence values in each NewCode category and bind it to the existing SpatVect
+extract_expBats_terra_NewCode_allParcels <- cbind(fveg_landIQ_labeled_vect, terra::extract(bat_exp_NAD83, fveg_landIQ_labeled_vect, fun = f, na.rm=TRUE))
+
+extract_expBats_terra_NewCode_allParcels_sf <- st_as_sf(extract_expBats_terra_NewCode_allParcels)
+
+extract_expBats_terra_NewCode_allParcels_sf$area_m2 <- st_area(extract_expBats_terra_NewCode_allParcels_sf) %>% as.numeric()
+extract_expBats_terra_NewCode_allParcels_sf <- extract_expBats_terra_NewCode_allParcels_sf %>%  mutate(area_ha = round(area_m2/1e4, 2))
+
+# Convert the results to a data frame
+extract_expBats_terra_NewCode_allParcels_df <- extract_expBats_terra_NewCode_allParcels_sf %>% 
+  st_drop_geometry()
+```
+
+```{r}
+extract_expBats_terra_NewCode_allParcels_mean_mergecolor <- merge(extract_expBats_terra_NewCode_allParcels_df, group_colomap, by = "NewCode")
+
+extract_expBats_terra_NewCode_allParcels_mean_mergecolor$Group <- factor(extract_expBats_terra_NewCode_allParcels_mean_mergecolor$Group, levels = c("Agriculture", "Natural", "Urban/Other", "Water"))
+
+extract_expBats_terra_NewCode_allParcels_mean_mergecolor$NewClass_factor <- factor(extract_expBats_terra_NewCode_allParcels_mean_mergecolor$NewClass, levels = c("Fruits_Nuts_Vineyards", "Row_Field", "Grassland", "Rice", "Other_Agriculture", "Conifer", "Hardwood", "Shrub", "Herbaceous", "Desert", "Barren_Other", "Urban", "Water_Wetland"))
+```
+
+```{r}
+# calculate the average bat presence across all land cover types
+extract_expBats_terra_NewCode_allParcels_mean <- mean(extract_expBats_terra_NewCode_allParcels_df$layer.mean, na.rm = T) %>% round(1)
+
+# calculate the average bat presence across within land cover type
+extract_expBats_terra_NewCode_allParcels_df_summ <- extract_expBats_terra_NewCode_allParcels_mean_mergecolor %>% 
+  group_by(NewClass_factor, Group) %>% 
+  summarise(mean = mean(layer.mean, na.rm = T))
+```
+
+
+
+
+```{r}
+bats_area_scatter <- ggplot(data = extract_expBats_terra_NewCode_allParcels_mean_mergecolor, aes(x = area_ha, y = layer.mean, color = Group)) +
+  geom_point() +
+  geom_hline(yintercept = extract_expBats_terra_NewCode_allParcels_mean, color = "grey40", linetype = "dashed") + 
+  labs(x = "Parcel Area (ha)", y = "Bat Presence") +
+  scale_color_manual(values = cols) +
+  theme_bw() +
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1), text = element_text(size=18),
+        legend.title = element_blank(),
+    legend.position = c(0.8, 0.8),
+           legend.key.size = unit(1, "lines"),
+    legend.spacing.y = unit(0, "pt"),
+    legend.background = element_blank(),
+    #legend.position="bottom",
+    #legend.justification = "right",
+    legend.box.background = element_rect(size=0.5, linetype="solid", 
+                                  colour ="black"))
+
+bats_area_scatter
+
+
+bats_area_scatter_lc_facet <- ggplot() +
+  geom_point(data = extract_expBats_terra_NewCode_allParcels_mean_mergecolor, aes(x = area_ha, y = layer.mean, color = Group)) +
+  geom_hline(data = extract_expBats_terra_NewCode_allParcels_df_summ, aes(yintercept = mean, color = Group), color = "grey40", linetype = "dashed") + 
+  facet_wrap(~NewClass_factor) +
+  labs(x = "Parcel Area (ha)", y = "Bat Presence") +
+  scale_color_manual(values = cols) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1),
+        panel.border = element_rect(colour = "black", fill=NA, size=1),
+        legend.title = element_blank(),
+           legend.key.size = unit(1, "lines"),
+    legend.spacing.y = unit(0, "pt"),
+    legend.background = element_blank(),
+    #legend.position="bottom",
+    #legend.justification = "right",
+    legend.box.background = element_rect(size=0.5, linetype="solid", 
+                                  colour ="black"))
+
+bats_area_scatter_lc_facet
 ```
