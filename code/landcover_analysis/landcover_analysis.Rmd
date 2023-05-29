@@ -30,7 +30,7 @@ bat_study_area <- st_read(here("data/landcover_analysis/bats/bats_study_area/bat
 # WGS84 projection of the raw bats
 #bat_raw <- rast("~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/2017_aggregate_2017.tif") 
 # WGS84 projection of the exponentially corrected bat layer
-bat_exp <- rast(here("data/landcover_analysis/bats/bats_exponential_corrected_2017.tif")) 
+bat_exp <- rast(here("data/landcover_analysis/bats/bats_exponential_corrected_2018.tif")) 
 
 #bat_raw_NAD83 <- project(bat_raw, "epsg:3310")
 bat_exp_NAD83 <- project(bat_exp, "epsg:3310")
@@ -95,6 +95,11 @@ st_write(fveg_WHR10_erase_landIQ, here("data/landcover_analysis/output_layers/fv
 ```
 
 ```{r}
+fveg_WHR10_erase_landIQ <- st_read(here("data/landcover_analysis/output_layers/fveg_WHR10_erase_landIQ.gpkg"))
+```
+
+
+```{r}
 fveg_WHR10_erase_landIQ <- fveg_WHR10_erase_landIQ %>% 
   rename(LC_ID = values)
 
@@ -104,7 +109,7 @@ landIQ_LCID <- landIQ_clip2bats_SummerCropID_sub %>%
 
 fveg_landIQ_bind <- rbind(fveg_WHR10_erase_landIQ, landIQ_LCID)
 
-st_write(fveg_landIQ_bind, here("data/landcover_analysis/output_layers/fveg_landIQ_bind.gpkg"))
+#st_write(fveg_landIQ_bind, here("data/landcover_analysis/output_layers/fveg_landIQ_bind.gpkg"))
 ```
 
 ```{r}
@@ -121,26 +126,44 @@ fveg_landIQ_labeled_summ <- fveg_landIQ_labeled %>%
   group_by(NewCode) %>% 
   summarise()
 
-fveg_landIQ_labeled_summ_vect <- vect(fveg_landIQ_labeled_summ)
+#### This code previously worked but now terra::extract no longer seems to be able to extract multiple functions at once using the user-based function f below. We explored this even with a toy example with terra's built in data and the extract function still produces an error due to trying to extract mean and standard deviation at the same time
+# 
+# fveg_landIQ_labeled_summ_vect <- vect(fveg_landIQ_labeled_summ)
+# 
+# # function specifying what data to extract from the bats raster
+# f <- function(x, na.rm = T) {
+#        c(mean=mean(x, na.rm = na.rm),
+#         sd=sd(x, na.rm = na.rm)
+#     )
+# }
+# 
+# # extract the average and SD of exponentially corrected bat presence values in each NewCode category and bind it to the existing SpatVect
+# extract_expBats_terra_NewCode_f <- cbind(fveg_landIQ_labeled_summ_vect, terra::extract(bat_exp_NAD83, fveg_landIQ_labeled_summ_vect, fun = f, na.rm=TRUE))
+# 
+# # Convert the results to a data frame
+# extract_expBats_terra_NewCode_f_df <- data.frame(extract_expBats_terra_NewCode_f)
 
-# function specifying what data to extract from the bats raster
-f <- function(x, na.rm = T) {
-       c(mean=mean(x, na.rm = na.rm),
-        sd=sd(x, na.rm = na.rm)
-    )
-}
+# The crude solution to the above problem is to extract the mean and standard deviation separately
+extract_expBats_terra_NewCode_mean <- cbind(fveg_landIQ_labeled_summ_vect, terra::extract(bat_exp_NAD83, fveg_landIQ_labeled_summ_vect, fun = mean, na.rm=TRUE))
 
-# extract the average and SD of exponentially corrected bat presence values in each NewCode category and bind it to the existing SpatVect
-extract_expBats_terra_NewCode_f <- cbind(fveg_landIQ_labeled_summ_vect, terra::extract(bat_exp_NAD83, fveg_landIQ_labeled_summ_vect, fun = f, na.rm=TRUE))
+extract_expBats_terra_NewCode_sd <- cbind(fveg_landIQ_labeled_summ_vect, terra::extract(bat_exp_NAD83, fveg_landIQ_labeled_summ_vect, fun = sd, na.rm=TRUE))
 
-# Convert the results to a data frame
-extract_expBats_terra_NewCode_f_df <- data.frame(extract_expBats_terra_NewCode_f)
+
+# convert the results into mean and sd data frames
+extract_expBats_terra_NewCode_mean_df <- data.frame(extract_expBats_terra_NewCode_mean)
+extract_expBats_terra_NewCode_sd_df <- data.frame(extract_expBats_terra_NewCode_sd)
+
+# Rename the extracted column to be "Mean" instead of the generic "bats_exponential_corrected_2018"
+extract_expBats_terra_NewCode_mean_df <- extract_expBats_terra_NewCode_mean_df %>% 
+  rename(Mean = bats_exponential_corrected_2018)
+# Rename the extracted column to be "SD" instead of the generic "bats_exponential_corrected_2018"
+extract_expBats_terra_NewCode_sd_df <- extract_expBats_terra_NewCode_sd_df %>% 
+  rename(SD = bats_exponential_corrected_2018)
+
+# merge into a single data frame that contains the extracted Mean and SD data
+extract_expBats_terra_NewCode_df <- merge(extract_expBats_terra_NewCode_mean_df, extract_expBats_terra_NewCode_sd_df, by = c("NewCode", "ID"))
+
 ```
-
-```{r}
-st_write(fveg_landIQ_labeled, here("data/landcover_analysis/output_layers/combined_lc_labeled.shp"))
-```
-
 
 ```{r}
 NewCode_map <- data.frame(
@@ -148,8 +171,8 @@ NewCode_map <- data.frame(
   NewClass = c("Other_Agriculture", "Barren_Other", "Conifer", "Desert", "Hardwood", "Herbaceous", "Shrub", "Urban", "Water_Wetland", "Fruits_Nuts_Vineyards", "Row_Field", "Grassland", "Rice")
 )
 
-extract_expBats_simple <- extract_expBats_terra_NewCode_f_df %>% 
-  mutate(Mean = layer.mean, SD = layer.sd) %>% 
+extract_expBats_simple <- extract_expBats_terra_NewCode_df %>% 
+  #mutate(Mean = layer.mean, SD = layer.sd) %>% 
   dplyr::select(NewCode, Mean, SD)
 
 extract_merge <- merge(extract_expBats_simple, NewCode_map, by = "NewCode")
@@ -178,14 +201,14 @@ extract_merge_obs_mean <- mean(extract_merge_obs$Mean, na.rm = T) %>% round(1)
 
 
 ```{r}
-group_colomap <- data.frame(
+group_colormap <- data.frame(
   NewCode = c(10, 20, 30, 40, 50, 60, 70, 80, 101, 110, 120, 130, 140),
   Group = c("Agriculture", "Urban/Other", "Natural", "Natural", "Natural", "Natural", "Natural", "Urban/Other", "Water", "Agriculture", "Agriculture", "Agriculture", "Agriculture")
 )
 
 cols <- c("Agriculture" = "#efb672", "Natural" = "#49be75", "Urban/Other" = "#bc5090", "Water" = "#003f5c")
 
-extract_merge_obs_mergecolor <- merge(extract_merge_obs, group_colomap, by = "NewCode")
+extract_merge_obs_mergecolor <- merge(extract_merge_obs, group_colormap, by = "NewCode")
 ```
 
 ```{r}
@@ -233,7 +256,7 @@ area_merge_obs <- area_merge_obs %>%
 ```
 
 ```{r}
-area_merge_obs_mergecolor <- merge(area_merge_obs, group_colomap, by = "NewCode")
+area_merge_obs_mergecolor <- merge(area_merge_obs, group_colormap, by = "NewCode")
 ```
 
 
@@ -299,31 +322,55 @@ parcel_count_merge_obs_p <- ggplot(data = area_merge_obs_mergecolor, aes(x = reo
 parcel_count_merge_obs_p
 ```
 
+# The below code creates two scatter plots that we may not even include as supplementary figures
 ```{r}
 fveg_landIQ_labeled_vect <- vect(fveg_landIQ_labeled)
 
-# function specifying what data to extract from the bats raster
-f <- function(x, na.rm = T) {
-       c(mean=mean(x, na.rm = na.rm),
-        sd=sd(x, na.rm = na.rm)
-    )
-}
 
-# extract the average and SD of exponentially corrected bat presence values in each NewCode category and bind it to the existing SpatVect
-extract_expBats_terra_NewCode_allParcels <- cbind(fveg_landIQ_labeled_vect, terra::extract(bat_exp_NAD83, fveg_landIQ_labeled_vect, fun = f, na.rm=TRUE))
+# As noted earlier, terra::extract no longer is able to extract two functions (mean and sd) at the same time to our knowledge
+# # function specifying what data to extract from the bats raster
+# f <- function(x, na.rm = T) {
+#        c(mean=mean(x, na.rm = na.rm),
+#         sd=sd(x, na.rm = na.rm)
+#     )
+# }
+# 
+# # extract the average and SD of exponentially corrected bat presence values in each NewCode category and bind it to the existing SpatVect
+# extract_expBats_terra_NewCode_allParcels <- cbind(fveg_landIQ_labeled_vect, terra::extract(bat_exp_NAD83, fveg_landIQ_labeled_vect, fun = f, na.rm=TRUE))
 
-extract_expBats_terra_NewCode_allParcels_sf <- st_as_sf(extract_expBats_terra_NewCode_allParcels)
+# So now we extract the mean and sd separately
+extract_expBats_terra_NewCode_allParcels_mean <- cbind(fveg_landIQ_labeled_vect, terra::extract(bat_exp_NAD83, fveg_landIQ_labeled_vect, fun = mean, na.rm=TRUE))
 
-extract_expBats_terra_NewCode_allParcels_sf$area_m2 <- st_area(extract_expBats_terra_NewCode_allParcels_sf) %>% as.numeric()
-extract_expBats_terra_NewCode_allParcels_sf <- extract_expBats_terra_NewCode_allParcels_sf %>%  mutate(area_ha = round(area_m2/1e4, 2))
+extract_expBats_terra_NewCode_allParcels_sd <- cbind(fveg_landIQ_labeled_vect, terra::extract(bat_exp_NAD83, fveg_landIQ_labeled_vect, fun = sd, na.rm=TRUE))
+
+# Convert the result from extracting the mean to an SF object
+extract_expBats_terra_NewCode_allParcels_mean_sf <- st_as_sf(extract_expBats_terra_NewCode_allParcels_mean)
+
+# Update the name of the extracted data column to be "Mean"
+extract_expBats_terra_NewCode_allParcels_mean_sf <- extract_expBats_terra_NewCode_allParcels_mean_sf %>% 
+  rename(Mean = bats_exponential_corrected_2018)
+
+# add columns for the area (in sq. meters and hectares) of each parcel that bat data was extracted within
+extract_expBats_terra_NewCode_allParcels_mean_sf$area_m2 <- st_area(extract_expBats_terra_NewCode_allParcels_mean_sf) %>% as.numeric()
+extract_expBats_terra_NewCode_allParcels_mean_sf <- extract_expBats_terra_NewCode_allParcels_mean_sf %>%  mutate(area_ha = round(area_m2/1e4, 2))
 
 # Convert the results to a data frame
-extract_expBats_terra_NewCode_allParcels_df <- extract_expBats_terra_NewCode_allParcels_sf %>% 
+extract_expBats_terra_NewCode_allParcels_mean_df <- extract_expBats_terra_NewCode_allParcels_mean_sf %>% 
   st_drop_geometry()
+
+# Convert the result from extracting the std. deviation to be a data frame
+extract_expBats_terra_NewCode_allParcels_sd_df <- as.data.frame(extract_expBats_terra_NewCode_allParcels_sd)
+
+# Update the name of the extracted column to be "SD" instead of the generic raster name
+extract_expBats_terra_NewCode_allParcels_sd_df <- extract_expBats_terra_NewCode_allParcels_sd_df %>% 
+  rename(SD = bats_exponential_corrected_2018)
+
+# merge the data frames into one
+extract_expBats_terra_NewCode_allParcels_df <- merge(extract_expBats_terra_NewCode_allParcels_mean_df, extract_expBats_terra_NewCode_allParcels_sd_df, by = c("ID", "LC_ID", "NewCode", "NewClass", "WHR10NAME"))
 ```
 
 ```{r}
-extract_expBats_terra_NewCode_allParcels_mean_mergecolor <- merge(extract_expBats_terra_NewCode_allParcels_df, group_colomap, by = "NewCode")
+extract_expBats_terra_NewCode_allParcels_mean_mergecolor <- merge(extract_expBats_terra_NewCode_allParcels_df, group_colormap, by = "NewCode")
 
 extract_expBats_terra_NewCode_allParcels_mean_mergecolor$Group <- factor(extract_expBats_terra_NewCode_allParcels_mean_mergecolor$Group, levels = c("Agriculture", "Natural", "Urban/Other", "Water"))
 
@@ -332,19 +379,16 @@ extract_expBats_terra_NewCode_allParcels_mean_mergecolor$NewClass_factor <- fact
 
 ```{r}
 # calculate the average bat presence across all land cover types
-extract_expBats_terra_NewCode_allParcels_mean <- mean(extract_expBats_terra_NewCode_allParcels_df$layer.mean, na.rm = T) %>% round(1)
+extract_expBats_terra_NewCode_allParcels_mean <- mean(extract_expBats_terra_NewCode_allParcels_df$Mean, na.rm = T) %>% round(1)
 
 # calculate the average bat presence across within land cover type
 extract_expBats_terra_NewCode_allParcels_df_summ <- extract_expBats_terra_NewCode_allParcels_mean_mergecolor %>% 
   group_by(NewClass_factor, Group) %>% 
-  summarise(mean = mean(layer.mean, na.rm = T))
+  summarise(mean = mean(Mean, na.rm = T))
 ```
 
-
-
-
 ```{r}
-bats_area_scatter <- ggplot(data = extract_expBats_terra_NewCode_allParcels_mean_mergecolor, aes(x = area_ha, y = layer.mean, color = Group)) +
+bats_area_scatter <- ggplot(data = extract_expBats_terra_NewCode_allParcels_mean_mergecolor, aes(x = area_ha, y = Mean, color = Group)) +
   geom_point() +
   geom_hline(yintercept = extract_expBats_terra_NewCode_allParcels_mean, color = "grey40", linetype = "dashed") + 
   labs(x = "Parcel Area (ha)", y = "Bat Presence") +
@@ -365,7 +409,7 @@ bats_area_scatter
 
 
 bats_area_scatter_lc_facet <- ggplot() +
-  geom_point(data = extract_expBats_terra_NewCode_allParcels_mean_mergecolor, aes(x = area_ha, y = layer.mean, color = Group)) +
+  geom_point(data = extract_expBats_terra_NewCode_allParcels_mean_mergecolor, aes(x = area_ha, y = Mean, color = Group)) +
   geom_hline(data = extract_expBats_terra_NewCode_allParcels_df_summ, aes(yintercept = mean, color = Group), color = "grey40", linetype = "dashed") + 
   facet_wrap(~NewClass_factor) +
   labs(x = "Parcel Area (ha)", y = "Bat Presence") +
