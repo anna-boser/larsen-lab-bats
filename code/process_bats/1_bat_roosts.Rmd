@@ -21,6 +21,12 @@ library(data.table)
 
 ## Remove the signal from the bat roosts
 
+To remove the signal from the bat roosts, this notebook does the following: 
+- creates an exponential model that predicts bat occurrence based on the proximity to a roost
+- modifies this model to set predictions to zero if negative values are returned, since it does not make sense that there would be negative bat occurrence no matter how far you get from a roost. 
+- subtracts this bat occurrence prediction from the original observed bat occurrence, to return the number of bats present correcting for the proximity to any roosts
+- sets any negative values for corrected bat occurrence to 0, because it does not make sense to have negative bat occurrence. 
+
 
 ```{r}
 # bat occurance data
@@ -31,7 +37,7 @@ bat_roosts <- st_read(here("data", "ca_bat_roosts", "ca_colonies.shp")) %>% st_m
 ```
 
 ```{r}
-# turn bat occ data into a dataframe
+# turn bat occurance data into a dataframe
 bat_occ_df <- as.data.frame(bat_occ, xy=TRUE)
 names(bat_occ_df) <- c("x", "y", "bats")
 
@@ -42,6 +48,7 @@ x_roosts <- bat_roosts$xcoord
 y_roosts <- bat_roosts$ycoord
 ```
 
+Here is some exploratory code to help decide if I want to use logistic or exponential curves: 
 ```{r}
 # plot out the raw bat data
 
@@ -61,8 +68,6 @@ y_roosts <- bat_roosts$ycoord
 #   geom_raster(data = bat_occ_df, aes(x=x, y=y, fill=spline)) + 
 #   geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord))
 ```
-
-That did not work. Second trial: plot out the spatial decay for each of the 8 roosts
 
 ```{r}
 # Make a function that only keeps points that are within r from a point
@@ -102,21 +107,21 @@ That did not work. Second trial: plot out the spatial decay for each of the 8 ro
 #   geom_line(aes(x=dist, y=fit$fitted.values*max(bats)), color = "red")
 ```
 
-I thing the logistic regression wins. Neither is perfect though... maybe there's a better function out there. Now I need to code it up so that
-1: I can get the logistic regressions for all 8 roosts
+The exponential function wins. Now I need to code it up so that
+1: I can get the exponential function for all 8 roosts
 2: I can combine all of the regressions on the 3d plane
 
-To combine all of the regressions, I think that I'll 
+To combine all of the regressions, I:
 1: separately calculate the predictions over the entire study area for each regression
 2: add them together
 3: subtract the result from the observed bats
 
 Ok full step by step: 
 1: add a column for distance to each roost to bat_occ_df
-2: Fit a separate logistic regression for each roost based on the closest 0.05 degrees
-3: generate predictions for each roost regression
-4: add together the predictions for each roost regression
-5: subtract the total roost regression from the bats
+2: Fit a separate exponential function for each roost based on the closest 0.05 degrees
+3: generate predictions for each roost regression. This is what the model predicts will be the bat occurrence based solely on its proximity to that one roost. 
+4: add together the predictions for each roost regression. This is the number of bats that would be at any given spot given all of the roosts in the area
+5: subtract the total roost regression from the bats. This is the number of total bats observed minus the bats that would be there simply due to the proximity to a roost. In other words, this is bat occurrence correcting for roosts. 
 6: plot out the result
 
 ```{r}
@@ -136,7 +141,6 @@ for (i in 1:nrow(bat_roosts)){
 ```{r}
 # 2: Fit a separate logistic regression for each roost based on the closest 0.05 degrees
 # and
-# 3: generate predictions for each roost regression
 
 # logistic_pred <- function(d, roost_num, r){
 #   d['dist'] <- d[paste0("dist", roost_num)]
@@ -154,6 +158,9 @@ for (i in 1:nrow(bat_roosts)){
 #   save[paste0("logistic", roost_num)] <- predict(fit, save)*max_bats
 #   return(save)
 # }
+
+# 2: Fit a separate exponential function for each roost based on the closest 0.05 degrees
+# and
 
 exponential_pred <- function(d, roost_num, r){
   d['dist'] <- d[paste0("dist", roost_num)]
@@ -173,18 +180,21 @@ exponential_pred <- function(d, roost_num, r){
 ```
 
 ```{r}
+# 3: generate predictions for each roost function
+
+# Logistic: 
 # for (i in 1:nrow(bat_roosts)){
 #   bat_occ_df <- logistic_pred(d=bat_occ_df, roost_num=i, r=0.05)
 # }
-```
 
-```{r}
+# exponential:
 for (i in 1:nrow(bat_roosts)){
   bat_occ_df <- exponential_pred(d=bat_occ_df, roost_num=i, r=0.05)
 }
 ```
 
 ```{r}
+# remove the pixels that are too close to the roost and therefore the exponential function will not work properly
 far_from_roosts <- filter(bat_occ_df, 
                           dist1 > 0.01, 
                           dist2 > 0.01, 
@@ -233,68 +243,66 @@ far_from_roosts <- corrected_pred(far_from_roosts, func="exponential_r0.05")
 #   geom_raster(data = bat_occ_df, aes(x=x, y=y, fill=logistic_pred)) + 
 #   geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
 #   ggtitle("logistic_corrected_bats")
-```
 
-```{r}
-# plot out results for exponential
+# 6: plot out results for exponential
 
 ggplot() + 
   geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=bats)) + 
   geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
-  ggtitle("original_bats") + 
+  ggtitle("original bat occurance") + 
   scale_fill_distiller(palette="Spectral", direction = 1)
 
 ggplot() + 
   geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=exponential_r0.05)) + 
   geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
-  ggtitle("exponential_corrected_bats (0.01 degrees from roosts)") + 
+  ggtitle("exponential model of bat occurance based on proximity to roosts (0.01 degrees from roosts removed)") + 
   scale_fill_distiller(palette="Spectral", direction = 1)
 
 ggplot() + 
   geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=exponential_r0.05_pred)) + 
   geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
-  ggtitle("exponential_corrected_bats (0.01 degrees from roosts)") + 
+  ggtitle("Bat occurance corrected for roost precence using exponential model (0.01 degrees from roosts removed)") + 
   scale_fill_distiller(palette="Spectral", direction = 1)
 
 ```
 
 There are two problems with the above plots. 
-1) the exponential predictions are negative on the edges, so we need to bump those up to zero
-2) there are some negative bat predictions near the roots, so we need to bump those up to zero
+1) the exponential predictions (as in th exponential model predicts an average of negative bats) are negative on the edges, so we need to bump those up to zero
+2) there are some negative bat predictions (that is number of bats minus exponential predictions) near the roosts, so we need to bump those up to zero
 
 ```{r}
 
 ggplot() + 
   geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=bats)) + 
   geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
-  ggtitle("original_bats") + 
+  ggtitle("original bat occurance") + 
   scale_fill_distiller(palette="Spectral", direction = 1)
 
 # first bump negative exponential predictions up to zero
-far_from_roosts$noneg <- ifelse(far_from_roosts$exponential_r0.05<0, 0, far_from_roosts$exponential_r0.05)
+far_from_roosts$exponential_noneg <- ifelse(far_from_roosts$exponential_r0.05<0, 0, far_from_roosts$exponential_r0.05)
 
 ggplot() + 
-  geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=noneg)) + 
+  geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=exponential_noneg)) + 
   geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
-  ggtitle("exponential_corrected_bats (0.01 degrees from roosts)") + 
+  ggtitle("exponential model predictions with negative predictions set to zero (0.01 degrees from roosts removed)") + 
   scale_fill_distiller(palette="Spectral", direction = 1)
 
 # get new bat predictions
-far_from_roosts$noneg_pred <- far_from_roosts$bats - far_from_roosts$noneg
+far_from_roosts$exp_corrected_bat_occ <- far_from_roosts$bats - far_from_roosts$exponential_noneg
 
 ggplot() + 
-  geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=noneg_pred)) + 
+  geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=exp_corrected_bat_occ)) + 
   geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
-  ggtitle("exponential_corrected_bats (0.01 degrees from roosts)") + 
+  ggtitle("Roost corrected bat occurance (negative exponential model predictions set to 0) (0.01 degrees from roosts removed)") + 
   scale_fill_distiller(palette="Spectral", direction = 1)
 
 # then bump negative bat predictions up to zero
-far_from_roosts$noneg_pred_noneg <- ifelse(far_from_roosts$noneg_pred<0, 0, far_from_roosts$noneg_pred)
+far_from_roosts$final_occurrence_corrected <- ifelse(far_from_roosts$exp_corrected_bat_occ<0, 0, far_from_roosts$exp_corrected_bat_occ)
 
 ggplot() + 
-  geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=noneg_pred_noneg)) + 
+  geom_raster(data = far_from_roosts, aes(x=x, y=y, fill=final_occurrence_corrected)) + 
   geom_point(data = bat_roosts, aes(x=xcoord, y=ycoord)) + 
-  ggtitle("exponential_corrected_bats (0.01 degrees from roosts)") + 
+  ggtitle("Roost corrected bat occurance (negative values set to 0; negative exponential model predictions set to 0) (0.01 degrees from roosts removed)") + 
   scale_fill_distiller(palette="Spectral", direction = 1)
 ```
 
@@ -302,7 +310,7 @@ ggplot() +
 ```{r}
 library(raster)
 # turn the corrected stuff back into a raster
-r <- rasterFromXYZ(far_from_roosts[, c('x', 'y', 'noneg_pred_noneg')], crs = crs(bat_occ))
+r <- rasterFromXYZ(far_from_roosts[, c('x', 'y', 'final_occurrence_corrected')], crs = crs(bat_occ))
 
 # save
 writeRaster(r, here("data","bats_roost_adjusted", "bats_exponential_corrected_2017.tif"), overwrite = TRUE)
