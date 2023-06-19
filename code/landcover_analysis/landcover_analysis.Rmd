@@ -30,7 +30,7 @@ bat_study_area <- st_read(here("data/landcover_analysis/bats/bats_study_area/bat
 # WGS84 projection of the raw bats
 #bat_raw <- rast("~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/2017_aggregate_2017.tif") 
 # WGS84 projection of the exponentially corrected bat layer
-bat_exp <- rast(here("data/landcover_analysis/bats/bats_exponential_corrected_2018.tif")) 
+bat_exp <- rast(here("data/bats_roost_adjusted/bats_exponential_corrected_2018_postprocess.tif")) 
 
 #bat_raw_NAD83 <- project(bat_raw, "epsg:3310")
 bat_exp_NAD83 <- project(bat_exp, "epsg:3310")
@@ -66,6 +66,7 @@ st_write(fveg_resample_ngb_sf, here("data/landcover_analysis/fveg/fveg_resample_
 ```{r}
 # Data IQ crop data from 2019 downloaded from https://data.cnra.ca.gov/dataset/statewide-crop-mapping
 landIQ <- st_read(here("data/landcover_analysis/i15_Crop_Mapping_2019/i15_Crop_Mapping_2019.shp")) %>% 
+  st_zm(drop = TRUE) %>% #add this because we had issues https://r-spatial.github.io/sf/reference/st_zm.html
   st_transform(st_crs(3310)) %>%  # project into NAD83 / California Albers projection
   st_make_valid()
 
@@ -101,19 +102,20 @@ fveg_WHR10_erase_landIQ <- st_read(here("data/landcover_analysis/output_layers/f
 
 ```{r}
 fveg_WHR10_erase_landIQ <- fveg_WHR10_erase_landIQ %>% 
-  rename(LC_ID = values)
+  rename(LC_ID = fveg_whr10num_ClipBats, geometry=geom)
 
 landIQ_LCID <- landIQ_clip2bats_SummerCropID_sub %>% 
   mutate(LC_ID = SummerCropID) %>% 
   dplyr::select(LC_ID)
 
-fveg_landIQ_bind <- rbind(fveg_WHR10_erase_landIQ, landIQ_LCID)
+fveg_landIQ_bind <- rbind(fveg_WHR10_erase_landIQ, landIQ_LCID) # Not sure this rbind is being saved
 
-#st_write(fveg_landIQ_bind, here("data/landcover_analysis/output_layers/fveg_landIQ_bind.gpkg"))
+st_write(fveg_landIQ_bind, here("data/landcover_analysis/output_layers/fveg_landIQ_bind.gpkg"), delete_dsn = T)
 ```
 
 ```{r}
 fveg_landIQ_bind <- st_read(here("data/landcover_analysis/output_layers/fveg_landIQ_bind.gpkg"))
+# I think this might be reading in an obsolete file.
 ```
 
 ```{r}
@@ -128,7 +130,7 @@ fveg_landIQ_labeled_summ <- fveg_landIQ_labeled %>%
 
 #### This code previously worked but now terra::extract no longer seems to be able to extract multiple functions at once using the user-based function f below. We explored this even with a toy example with terra's built in data and the extract function still produces an error due to trying to extract mean and standard deviation at the same time
 # 
-# fveg_landIQ_labeled_summ_vect <- vect(fveg_landIQ_labeled_summ)
+fveg_landIQ_labeled_summ_vect <- vect(fveg_landIQ_labeled_summ) # Still need to assign this
 # 
 # # function specifying what data to extract from the bats raster
 # f <- function(x, na.rm = T) {
@@ -155,10 +157,10 @@ extract_expBats_terra_NewCode_sd_df <- data.frame(extract_expBats_terra_NewCode_
 
 # Rename the extracted column to be "Mean" instead of the generic "bats_exponential_corrected_2018"
 extract_expBats_terra_NewCode_mean_df <- extract_expBats_terra_NewCode_mean_df %>% 
-  rename(Mean = bats_exponential_corrected_2018)
+  rename(Mean = bats_exponential_corrected_2018_postprocess)
 # Rename the extracted column to be "SD" instead of the generic "bats_exponential_corrected_2018"
 extract_expBats_terra_NewCode_sd_df <- extract_expBats_terra_NewCode_sd_df %>% 
-  rename(SD = bats_exponential_corrected_2018)
+  rename(SD = bats_exponential_corrected_2018_postprocess)
 
 # merge into a single data frame that contains the extracted Mean and SD data
 extract_expBats_terra_NewCode_df <- merge(extract_expBats_terra_NewCode_mean_df, extract_expBats_terra_NewCode_sd_df, by = c("NewCode", "ID"))
@@ -168,7 +170,7 @@ extract_expBats_terra_NewCode_df <- merge(extract_expBats_terra_NewCode_mean_df,
 ```{r}
 NewCode_map <- data.frame(
   NewCode = c(10, 20, 30, 40, 50, 60, 70, 80, 101, 110, 120, 130, 140),
-  NewClass = c("Other_Agriculture", "Barren_Other", "Conifer", "Desert", "Hardwood", "Herbaceous", "Shrub", "Urban", "Water_Wetland", "Fruits_Nuts_Vineyards", "Row_Field", "Grassland", "Rice")
+  NewClass = c("Other Agriculture", "Barren/Other", "Conifer", "Desert", "Hardwood", "Herbaceous", "Shrub", "Urban", "Water/Wetland", "Fruits/Nuts/Vineyards", "Row Field", "Grassland", "Rice")
 )
 
 extract_expBats_simple <- extract_expBats_terra_NewCode_df %>% 
@@ -217,7 +219,7 @@ allpolys_lc_expbats_mean <- ggplot(data = extract_merge_obs_mergecolor, aes(x = 
   geom_point() +
   geom_errorbar(aes(ymin=Mean-LC_95perc, ymax=Mean+LC_95perc, color = Group)) +
   geom_hline(yintercept = extract_merge_obs_mean, color = "grey40", linetype = "dashed") + 
-  labs(x = "Land Cover", y = "Bat Presence") +
+  labs(x = "Land Cover", y = "Bat Presence (Count)") +
   scale_color_manual(values = cols) +
   coord_flip() + 
   theme_bw() +
@@ -348,7 +350,7 @@ extract_expBats_terra_NewCode_allParcels_mean_sf <- st_as_sf(extract_expBats_ter
 
 # Update the name of the extracted data column to be "Mean"
 extract_expBats_terra_NewCode_allParcels_mean_sf <- extract_expBats_terra_NewCode_allParcels_mean_sf %>% 
-  rename(Mean = bats_exponential_corrected_2018)
+  rename(Mean = bats_exponential_corrected_2018_postprocess)
 
 # add columns for the area (in sq. meters and hectares) of each parcel that bat data was extracted within
 extract_expBats_terra_NewCode_allParcels_mean_sf$area_m2 <- st_area(extract_expBats_terra_NewCode_allParcels_mean_sf) %>% as.numeric()
@@ -363,7 +365,7 @@ extract_expBats_terra_NewCode_allParcels_sd_df <- as.data.frame(extract_expBats_
 
 # Update the name of the extracted column to be "SD" instead of the generic raster name
 extract_expBats_terra_NewCode_allParcels_sd_df <- extract_expBats_terra_NewCode_allParcels_sd_df %>% 
-  rename(SD = bats_exponential_corrected_2018)
+  rename(SD = bats_exponential_corrected_2018_postprocess)
 
 # merge the data frames into one
 extract_expBats_terra_NewCode_allParcels_df <- merge(extract_expBats_terra_NewCode_allParcels_mean_df, extract_expBats_terra_NewCode_allParcels_sd_df, by = c("ID", "LC_ID", "NewCode", "NewClass", "WHR10NAME"))
@@ -374,7 +376,7 @@ extract_expBats_terra_NewCode_allParcels_mean_mergecolor <- merge(extract_expBat
 
 extract_expBats_terra_NewCode_allParcels_mean_mergecolor$Group <- factor(extract_expBats_terra_NewCode_allParcels_mean_mergecolor$Group, levels = c("Agriculture", "Natural", "Urban/Other", "Water"))
 
-extract_expBats_terra_NewCode_allParcels_mean_mergecolor$NewClass_factor <- factor(extract_expBats_terra_NewCode_allParcels_mean_mergecolor$NewClass, levels = c("Fruits_Nuts_Vineyards", "Row_Field", "Grassland", "Rice", "Other_Agriculture", "Conifer", "Hardwood", "Shrub", "Herbaceous", "Desert", "Barren_Other", "Urban", "Water_Wetland"))
+extract_expBats_terra_NewCode_allParcels_mean_mergecolor$NewClass_factor <- factor(extract_expBats_terra_NewCode_allParcels_mean_mergecolor$NewClass, levels = c("Fruits/Nuts/Vineyards", "Row_Field", "Grassland", "Rice", "Other Agriculture", "Conifer", "Hardwood", "Shrub", "Herbaceous", "Desert", "Barren/Other", "Urban", "Water/Wetland"))
 ```
 
 ```{r}
