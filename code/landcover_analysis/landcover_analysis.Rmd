@@ -102,7 +102,7 @@ fveg_WHR10_erase_landIQ <- st_read(here("data/landcover_analysis/output_layers/f
 
 ```{r}
 fveg_WHR10_erase_landIQ <- fveg_WHR10_erase_landIQ %>% 
-  rename(LC_ID = fveg_whr10num_ClipBats, geometry=geom)
+  rename(LC_ID = values, geometry=geom)
 
 landIQ_LCID <- landIQ_clip2bats_SummerCropID_sub %>% 
   mutate(LC_ID = SummerCropID) %>% 
@@ -157,20 +157,38 @@ extract_expBats_terra_NewCode_sd_df <- data.frame(extract_expBats_terra_NewCode_
 
 # Rename the extracted column to be "Mean" instead of the generic "bats_exponential_corrected_2018"
 extract_expBats_terra_NewCode_mean_df <- extract_expBats_terra_NewCode_mean_df %>% 
-  rename(Mean = bats_exponential_corrected_2018_postprocess)
+  rename(Mean = bats_exponential_corrected_2018)
 # Rename the extracted column to be "SD" instead of the generic "bats_exponential_corrected_2018"
 extract_expBats_terra_NewCode_sd_df <- extract_expBats_terra_NewCode_sd_df %>% 
-  rename(SD = bats_exponential_corrected_2018_postprocess)
+  rename(SD = bats_exponential_corrected_2018)
 
 # merge into a single data frame that contains the extracted Mean and SD data
 extract_expBats_terra_NewCode_df <- merge(extract_expBats_terra_NewCode_mean_df, extract_expBats_terra_NewCode_sd_df, by = c("NewCode", "ID"))
 
 ```
 
+
+```{r}
+extract_expBats_terra_NewCode_sum <- cbind(fveg_landIQ_labeled_summ_vect, terra::extract(bat_exp_NAD83, fveg_landIQ_labeled_summ_vect, fun = sum, na.rm=TRUE))
+
+
+# convert the results into mean and sd data frames
+extract_expBats_terra_NewCode_sum_df <- data.frame(extract_expBats_terra_NewCode_sum)
+
+# Rename the extracted column to be "Mean" instead of the generic "bats_exponential_corrected_2018"
+extract_expBats_terra_NewCode_sum_df <- extract_expBats_terra_NewCode_sum_df %>% 
+  rename(TotalBats = bats_exponential_corrected_2018)
+```
+
+```{r}
+
+```
+
+
 ```{r}
 NewCode_map <- data.frame(
   NewCode = c(10, 20, 30, 40, 50, 60, 70, 80, 101, 110, 120, 130, 140),
-  NewClass = c("Other Agriculture", "Barren/Other", "Conifer", "Desert", "Hardwood", "Herbaceous", "Shrub", "Urban", "Water/Wetland", "Fruits/Nuts/Vineyards", "Row Field", "Grassland", "Rice")
+  NewClass = c("Miscellaneous", "Barren/Other", "Conifer", "Desert", "Hardwood", "Herbaceous", "Shrub", "Urban", "Water/Wetland", "Fruits/Nuts/Vineyards", "Row Field", "Grassland", "Rice")
 )
 
 extract_expBats_simple <- extract_expBats_terra_NewCode_df %>% 
