@@ -27,10 +27,8 @@ bat_study_area <- st_read(here("data/landcover_analysis/bats/bats_study_area/bat
   st_transform(st_crs(3310)) %>% 
   st_make_valid()
 
-# WGS84 projection of the raw bats
-#bat_raw <- rast("~/Documents/github/larsen-lab-bats/data/landcover_analysis/bats/2017_aggregate_2017.tif") 
 # WGS84 projection of the exponentially corrected bat layer
-bat_exp <- rast(here("data/bats_roost_adjusted/bats_exponential_corrected_2018_postprocess.tif")) 
+bat_exp <- rast(here("data/aggregated_data/bats_exponential_corrected_2019.tif")) 
 
 #bat_raw_NAD83 <- project(bat_raw, "epsg:3310")
 bat_exp_NAD83 <- project(bat_exp, "epsg:3310")
@@ -124,13 +122,9 @@ LC_newcode_labels <- read_csv(here("data/landcover_analysis/CSV_files/newcode_la
 
 fveg_landIQ_labeled <- merge(fveg_landIQ_bind, LC_newcode_labels, by = "LC_ID")
 
-fveg_landIQ_labeled_summ <- fveg_landIQ_labeled %>% 
-  group_by(NewCode) %>% 
-  summarise()
-
 #### This code previously worked but now terra::extract no longer seems to be able to extract multiple functions at once using the user-based function f below. We explored this even with a toy example with terra's built in data and the extract function still produces an error due to trying to extract mean and standard deviation at the same time
 # 
-fveg_landIQ_labeled_summ_vect <- vect(fveg_landIQ_labeled_summ) # Still need to assign this
+fveg_landIQ_labeled_vect <- vect(fveg_landIQ_labeled) # Still need to assign this
 # 
 # # function specifying what data to extract from the bats raster
 # f <- function(x, na.rm = T) {
@@ -145,43 +139,51 @@ fveg_landIQ_labeled_summ_vect <- vect(fveg_landIQ_labeled_summ) # Still need to 
 # # Convert the results to a data frame
 # extract_expBats_terra_NewCode_f_df <- data.frame(extract_expBats_terra_NewCode_f)
 
-# The crude solution to the above problem is to extract the mean and standard deviation separately
-extract_expBats_terra_NewCode_mean <- cbind(fveg_landIQ_labeled_summ_vect, terra::extract(bat_exp_NAD83, fveg_landIQ_labeled_summ_vect, fun = mean, na.rm=TRUE))
+# extract total bats over each of the polygons 
+extract_expBats_terra_NewCode_sum <- cbind(fveg_landIQ_labeled, terra::extract(bat_exp_NAD83, fveg_landIQ_labeled, fun = sum, na.rm=TRUE))
 
-extract_expBats_terra_NewCode_sd <- cbind(fveg_landIQ_labeled_summ_vect, terra::extract(bat_exp_NAD83, fveg_landIQ_labeled_summ_vect, fun = sd, na.rm=TRUE))
-
-
-# convert the results into mean and sd data frames
-extract_expBats_terra_NewCode_mean_df <- data.frame(extract_expBats_terra_NewCode_mean)
-extract_expBats_terra_NewCode_sd_df <- data.frame(extract_expBats_terra_NewCode_sd)
-
-# Rename the extracted column to be "Mean" instead of the generic "bats_exponential_corrected_2018"
-extract_expBats_terra_NewCode_mean_df <- extract_expBats_terra_NewCode_mean_df %>% 
-  rename(Mean = bats_exponential_corrected_2018)
-# Rename the extracted column to be "SD" instead of the generic "bats_exponential_corrected_2018"
-extract_expBats_terra_NewCode_sd_df <- extract_expBats_terra_NewCode_sd_df %>% 
-  rename(SD = bats_exponential_corrected_2018)
-
-# merge into a single data frame that contains the extracted Mean and SD data
-extract_expBats_terra_NewCode_df <- merge(extract_expBats_terra_NewCode_mean_df, extract_expBats_terra_NewCode_sd_df, by = c("NewCode", "ID"))
-
-```
-
-
-```{r}
-extract_expBats_terra_NewCode_sum <- cbind(fveg_landIQ_labeled_summ_vect, terra::extract(bat_exp_NAD83, fveg_landIQ_labeled_summ_vect, fun = sum, na.rm=TRUE))
-
-
-# convert the results into mean and sd data frames
+# convert the results into data frame
 extract_expBats_terra_NewCode_sum_df <- data.frame(extract_expBats_terra_NewCode_sum)
 
-# Rename the extracted column to be "Mean" instead of the generic "bats_exponential_corrected_2018"
+# Rename the extracted column to be "TotalBats" instead of the generic "bats_exponential_corrected_2018"
 extract_expBats_terra_NewCode_sum_df <- extract_expBats_terra_NewCode_sum_df %>% 
-  rename(TotalBats = bats_exponential_corrected_2018)
+  rename(TotalBats = bats_exponential_corrected_2019)
+
+```
+```{r}
+extract_expBats_terra_NewCode_sum_area <- extract_expBats_terra_NewCode_sum %>% 
+  mutate(area_m2 = st_area(.) %>% as.numeric(), TotalBats = bats_exponential_corrected_2019) %>% 
+  mutate(bats_m2 = TotalBats/area_m2)
+
+extract_expBats_terra_NewCode_sum_area_df <- extract_expBats_terra_NewCode_sum_area %>% 
+  st_drop_geometry()
+
+# should this be an area-weighted average? that doesnʻt seem necessary
+extract_expBats_terra_NewCode_sum_area_df_summary <- extract_expBats_terra_NewCode_sum_area_df %>% 
+  group_by(NewClass) %>% 
+  summarise(NewClass_mean = mean(bats_m2, na.rm = T), obs_count = sum(area_m2 != 0), sd = sd(bats_m2, na.rm = T), se = sd/sqrt(obs_count), NewClass_bats_95perc = 1.96*se) %>% 
+  ungroup()
+
+extract_expBats_terra_NewCode_sum_area_df[is.na(extract_expBats_terra_NewCode_sum_area_df)] <- 0
+
+extract_expBats_terra_NewCode_sum_area_df_summary_weighted <- extract_expBats_terra_NewCode_sum_area_df %>% 
+  group_by(NewClass) %>% 
+  summarise(bats_m2_AW = sum(bats_m2*area_m2)/sum(area_m2), obs_count = sum(area_m2 != 0), sd_AW = sqrt(sum(area_m2 * (bats_m2 -bats_m2_AW)^2) / (sum(area_m2)*(obs_count-1)/obs_count)), se_AW = sd_AW/sqrt(obs_count), bats_m2_95perc_AW = 1.96*se_AW, NewClassArea_m2 = sum(area_m2)) %>% 
+  ungroup()  
+
+extract_expBats_overall_stats <- extract_expBats_terra_NewCode_sum_area_df %>% 
+  summarise(bats_m2_AW = sum(bats_m2*area_m2)/sum(area_m2), obs_count = sum(area_m2 != 0), sd_AW = sqrt(sum(area_m2 * (bats_m2 -bats_m2_AW)^2) / (sum(area_m2)*(obs_count-1)/obs_count)), se_AW = sd_AW/sqrt(obs_count), NewClass_bats_95perc = 1.96*se_AW, bats_m2_95perc_AW = sum(area_m2)) %>% 
+  ungroup() 
 ```
 
 ```{r}
-
+LC_newcode_labels_simple <- LC_newcode_labels %>% 
+  dplyr::select(NewClass, NewCode) %>% 
+  group_by(NewClass, NewCode) %>% 
+  unique() %>% 
+  ungroup()
+  
+extract_expBats_terra_NewCode_sum_area_df_summary_weighted_labeled <- merge(extract_expBats_terra_NewCode_sum_area_df_summary_weighted, LC_newcode_labels_simple, by = "NewClass")
 ```
 
 
@@ -191,9 +193,9 @@ NewCode_map <- data.frame(
   NewClass = c("Miscellaneous", "Barren/Other", "Conifer", "Desert", "Hardwood", "Herbaceous", "Shrub", "Urban", "Water/Wetland", "Fruits/Nuts/Vineyards", "Row Field", "Grassland", "Rice")
 )
 
-extract_expBats_simple <- extract_expBats_terra_NewCode_df %>% 
-  #mutate(Mean = layer.mean, SD = layer.sd) %>% 
-  dplyr::select(NewCode, Mean, SD)
+extract_expBats_simple <- extract_expBats_terra_NewCode_sum_area_df_summary_weighted_labeled %>% 
+  mutate(bats_m2_AW = NewClass_mean_AW, bats_m2_95perc_AW = NewClass_bats_95perc) %>% 
+  dplyr::select(NewCode, bats_m2_AW, bats_m2_95perc_AW)
 
 extract_merge <- merge(extract_expBats_simple, NewCode_map, by = "NewCode")
 ```
@@ -215,8 +217,6 @@ extract_merge_obs <- extract_merge_obs %>%
 ```{r}
 # calculate the average bat prescence across land cover types to be added as a reference line on the figure
 extract_merge_obs_mean <- mean(extract_merge_obs$Mean, na.rm = T) %>% round(1)
-# median value is very similar to the mean
-#extract_merge_obs_median <- median(extract_merge_obs$Mean, na.rm = T) %>% round(1)
 ```
 
 
@@ -228,20 +228,26 @@ group_colormap <- data.frame(
 
 cols <- c("Agriculture" = "#efb672", "Natural" = "#49be75", "Urban/Other" = "#bc5090", "Water" = "#003f5c")
 
-extract_merge_obs_mergecolor <- merge(extract_merge_obs, group_colormap, by = "NewCode")
+extract_merge_mergecolor <- merge(extract_merge, group_colormap, by = "NewCode")
 ```
 
 ```{r}
+view(extract_merge_mergecolor)
+```
+
+
+```{r}
+library(ggtext)
 # plot the average and the standard error
-allpolys_lc_expbats_mean <- ggplot(data = extract_merge_obs_mergecolor, aes(x = reorder(NewClass, Mean), y = Mean, color = Group)) + 
+allpolys_lc_expbats_mean <- ggplot(data = extract_merge_mergecolor, aes(x = reorder(NewClass, bats_m2_AW), y = bats_m2_AW, color = Group)) + 
   geom_point() +
-  geom_errorbar(aes(ymin=Mean-LC_95perc, ymax=Mean+LC_95perc, color = Group)) +
-  geom_hline(yintercept = extract_merge_obs_mean, color = "grey40", linetype = "dashed") + 
-  labs(x = "Land Cover", y = "Bat Presence (Count)") +
+  geom_errorbar(aes(ymin=bats_m2_AW-bats_m2_95perc_AW, ymax=bats_m2_AW+bats_m2_95perc_AW, color = Group)) +
+  geom_hline(yintercept = mean(extract_merge_mergecolor$bats_m2_AW), color = "grey40", linetype = "dashed") + 
+  labs(x = "", y = "Bat Occurrences/m^(2)") +
   scale_color_manual(values = cols) +
   coord_flip() + 
   theme_bw() +
-  theme(panel.border = element_rect(colour = "black", fill=NA, size=1), text = element_text(size=18),
+  theme(axis.title.x = element_markdown(), panel.border = element_rect(colour = "black", fill=NA, size=1), text = element_text(size=18),
         legend.title = element_blank(),
     legend.position = c(0.8, 0.2),
            legend.key.size = unit(1, "lines"),
@@ -254,6 +260,8 @@ allpolys_lc_expbats_mean <- ggplot(data = extract_merge_obs_mergecolor, aes(x = 
 
 allpolys_lc_expbats_mean
 ```
+
+
 
 # Supplementary figures
 ```{r}
